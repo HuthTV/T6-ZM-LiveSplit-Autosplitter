@@ -1,25 +1,42 @@
 #define T6R_BUILD
 #include "../include/t6zm_reader.h"
-#include "fingerprint.hpp"
+#include "fingerprint_plutonium.hpp"
+#include "fingerprint_steam.hpp"
+#include "fingerprint_store.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include <cstddef>
+#include <iterator>
 #include <cstring>
 #include <string_view>
 #include <unordered_map>
 
 namespace {
 
-constexpr std::uint32_t vm_clock = 0x2DEA810;
-constexpr std::uint32_t level_root = 0x2DEA81C;
-constexpr std::uint32_t objects_root = 0x2DEA400;
-constexpr std::uint32_t children_root = 0x2DEA480;
-constexpr std::uint32_t values_root = 0x2DEA580;
-constexpr std::uint32_t strings_root = 0x2BF2DA4;
-constexpr std::uint32_t field_names_operand = 0x5466C8;
-constexpr std::uint32_t field_name_limit_operand = 0x51A9A3;
+using address_t = std::uint64_t;
+
+struct build_def {
+    const wchar_t* process;
+    const t6r::fingerprint::region* regions;
+    std::size_t region_count;
+    std::uint32_t pointer_size;
+    address_t vm_clock, level_root, objects_root, children_root, values_root, strings_root;
+    bool names_from_operands;
+    address_t field_names, field_name_limit;
+    bool strings_indirect;
+};
+
+constexpr build_def builds[] = {
+    {L"plutonium-bootstrapper-win32.exe", t6r::fingerprint::plutonium::regions, std::size(t6r::fingerprint::plutonium::regions), 4,
+     0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true},
+    {L"t6zm.exe", t6r::fingerprint::steam::regions, std::size(t6r::fingerprint::steam::regions), 4,
+     0x2D3A910, 0x2D3A91C, 0x2D3A500, 0x2D3A580, 0x2D3A680, 0x2B42EA4, true, 0x7E1180, 0x7E115B, true},
+    {L"t6zm.exe", t6r::fingerprint::store::regions, std::size(t6r::fingerprint::store::regions), 8,
+     0x14249191C, 0x142491928, 0x142491500, 0x142491580, 0x142491680, 0x142283580, false, 0x142416E00, 0x34BC, false},
+};
 
 constexpr std::uint32_t object_limit = 0x8000;
 constexpr std::uint32_t child_limit = 0x40000;
@@ -86,6 +103,7 @@ struct player_track {
 
 struct state {
     HANDLE process = nullptr;
+    const build_def* build = nullptr;
     bool unsupported = false;
     ULONGLONG next_attach = 0;
 
@@ -93,14 +111,15 @@ struct state {
     std::uint32_t level = 0;
     std::uint32_t generation = 0;
     std::uint32_t last_clock = 0;
-    std::uint32_t objects = 0, children = 0, values = 0, strings = 0;
+    address_t objects = 0, children = 0, values = 0, strings = 0;
     std::uint32_t flag_array = 0;
     ULONGLONG next_resolve = 0;
     bool complete = false;
     char map[32] = {};
     watch_slot watches[max_watches];
 
-    std::uint32_t field_names = 0, field_name_limit = 0;
+    address_t field_names = 0;
+    std::uint32_t field_name_limit = 0;
     std::uint32_t players_child = 0, players_array = 0;
     std::uint32_t players_bounds[2] = {};
     std::uint32_t player_count = 0;
@@ -109,21 +128,29 @@ struct state {
     player_track players[max_players];
 } g;
 
-bool read(std::uint32_t address, void* out, std::size_t size) {
+bool read(address_t address, void* out, std::size_t size) {
     SIZE_T done = 0;
-    return address >= 0x10000 && ReadProcessMemory(g.process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(address)), out, size, &done) && done == size;
+    return address >= 0x10000 && address <= UINTPTR_MAX && ReadProcessMemory(g.process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(address)), out, size, &done) && done == size;
 }
 
-bool u32(std::uint32_t address, std::uint32_t& out) { return read(address, &out, 4); }
+bool u32(address_t address, std::uint32_t& out) { return read(address, &out, 4); }
 
-bool text(std::uint32_t address, char* out, std::size_t capacity) {
+bool pointer(address_t address, address_t& out) {
+    if (g.build->pointer_size == 8) return read(address, &out, 8);
+    std::uint32_t narrow = 0;
+    if (!u32(address, narrow)) return false;
+    out = narrow;
+    return true;
+}
+
+bool text(address_t address, char* out, std::size_t capacity) {
     std::size_t length = 0;
     while (length + 1 < capacity) {
         char chunk[16];
         std::size_t got = sizeof(chunk);
-        if (!read(address + static_cast<std::uint32_t>(length), chunk, got)) {
+        if (!read(address + length, chunk, got)) {
             got = 1;
-            if (!read(address + static_cast<std::uint32_t>(length), chunk, got)) return false;
+            if (!read(address + length, chunk, got)) return false;
         }
         for (std::size_t i = 0; i < got && length + 1 < capacity; ++i) {
             if (chunk[i] == 0) {
@@ -137,7 +164,7 @@ bool text(std::uint32_t address, char* out, std::size_t capacity) {
     return false;
 }
 
-bool text_equals(std::uint32_t address, std::string_view expected) {
+bool text_equals(address_t address, std::string_view expected) {
     char buffer[64];
     return expected.size() < sizeof(buffer) && text(address, buffer, sizeof(buffer)) && expected == buffer;
 }
@@ -172,8 +199,10 @@ void close_process() {
     g.generation = generation;
 }
 
-bool fingerprint_matches(HANDLE process) {
-    for (const auto& region : t6r::fingerprint::regions) {
+bool fingerprint_matches(HANDLE process, const build_def& build) {
+    for (const auto* region_it = build.regions; region_it != build.regions + build.region_count; ++region_it) {
+        const auto& region = *region_it;
+        if (region.address > UINTPTR_MAX) return false;
         std::uint8_t live[0x100];
         SIZE_T done = 0;
         if (region.size > sizeof(live) || !ReadProcessMemory(process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(region.address)), live, region.size, &done) || done != region.size || std::memcmp(live, region.bytes, region.size) != 0) return false;
@@ -187,19 +216,24 @@ void attach() {
     g.next_attach = now + attach_interval_ms;
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W entry{sizeof(entry)};
     g.unsupported = false;
-    for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
-        if (_wcsicmp(entry.szExeFile, L"plutonium-bootstrapper-win32.exe") != 0) continue;
-        HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
-        if (!process) continue;
-        if (fingerprint_matches(process)) {
-            g.process = process;
-            g.unsupported = false;
-            break;
+    for (const build_def& build : builds) {
+        if (build.vm_clock > UINTPTR_MAX) continue;
+        PROCESSENTRY32W entry{sizeof(entry)};
+        for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
+            if (_wcsicmp(entry.szExeFile, build.process) != 0) continue;
+            HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+            if (!process) continue;
+            if (fingerprint_matches(process, build)) {
+                g.process = process;
+                g.build = &build;
+                g.unsupported = false;
+                CloseHandle(snapshot);
+                return;
+            }
+            CloseHandle(process);
+            g.unsupported = true;
         }
-        CloseHandle(process);
-        g.unsupported = true;
     }
     CloseHandle(snapshot);
 }
@@ -222,9 +256,24 @@ void forget_level() {
 
 void resolve(std::uint32_t level) {
     g.next_resolve = GetTickCount64() + resolve_interval_ms;
-    std::uint32_t objects = 0, children = 0, values = 0, strings = 0, field_names = 0, field_name_limit = 0;
-    if (!u32(objects_root, objects) || !u32(children_root, children) || !u32(values_root, values) || !u32(strings_root, strings)) return;
-    if (!u32(field_names_operand, field_names) || !u32(field_name_limit_operand, field_name_limit) || field_names < 0x10000 || field_name_limit <= 1 || field_name_limit > 0x10000) return;
+    address_t objects = 0, children = 0, values = 0, strings = 0, field_names = 0;
+    std::uint32_t field_name_limit = 0;
+    const build_def& build = *g.build;
+    if (!pointer(build.objects_root, objects) || !pointer(build.children_root, children) || !pointer(build.values_root, values)) return;
+    if (build.strings_indirect) {
+        if (!pointer(build.strings_root, strings)) return;
+    } else {
+        strings = build.strings_root;
+    }
+    if (build.names_from_operands) {
+        std::uint32_t table = 0;
+        if (!u32(build.field_names, table) || !u32(build.field_name_limit, field_name_limit)) return;
+        field_names = table;
+    } else {
+        field_names = build.field_names;
+        field_name_limit = static_cast<std::uint32_t>(build.field_name_limit);
+    }
+    if (field_names < 0x10000 || field_name_limit <= 1 || field_name_limit > 0x10000) return;
     g.objects = objects, g.children = children, g.values = values, g.strings = strings;
 
     std::uint32_t type = 0;
@@ -239,9 +288,9 @@ void resolve(std::uint32_t level) {
     while (current != 0) {
         child c{};
         if (++steps > chain_limit || !read_child(current, c) || c.owner != level || c.prev != previous) return;
-        std::uint32_t name_pointer = 0;
+        address_t name_pointer = 0;
         char name[64];
-        if (c.key > 0 && c.key < field_name_limit && u32(field_names + c.key * 4, name_pointer) && name_pointer != 0 && text(name_pointer, name, sizeof(name))) {
+        if (c.key > 0 && c.key < field_name_limit && pointer(field_names + c.key * build.pointer_size, name_pointer) && name_pointer != 0 && text(name_pointer, name, sizeof(name))) {
             if (c.tag == tag_object && std::strcmp(name, "flag") == 0) flag_array = c.payload;
             else if (c.tag == tag_object && std::strcmp(name, "players") == 0) players_child = current, players_array = c.payload;
             else if (c.tag == tag_string && std::strcmp(name, "script") == 0 && c.payload < child_limit) text(strings + c.payload * 24 + 4, map, sizeof(map));
@@ -268,8 +317,9 @@ void resolve(std::uint32_t level) {
         previous = current;
         current = c.next;
     }
-    std::uint32_t level_after = 0, objects_after = 0;
-    if (previous != bounds[1] || !u32(level_root, level_after) || level_after != level || !u32(objects_root, objects_after) || objects_after != objects) return;
+    std::uint32_t level_after = 0;
+    address_t objects_after = 0;
+    if (previous != bounds[1] || !u32(build.level_root, level_after) || level_after != level || !pointer(build.objects_root, objects_after) || objects_after != objects) return;
 
     g.flag_array = flag_array;
     g.field_names = field_names, g.field_name_limit = field_name_limit;
@@ -283,8 +333,8 @@ void resolve(std::uint32_t level) {
 }
 
 bool field_name(std::uint32_t key, char* out, std::size_t capacity) {
-    std::uint32_t pointer = 0;
-    return key > 0 && key < g.field_name_limit && u32(g.field_names + key * 4, pointer) && pointer != 0 && text(pointer, out, capacity);
+    address_t name_pointer = 0;
+    return key > 0 && key < g.field_name_limit && pointer(g.field_names + key * g.build->pointer_size, name_pointer) && name_pointer != 0 && text(name_pointer, out, capacity);
 }
 
 bool is_player_field(std::uint32_t key, const char* wanted) {
@@ -418,11 +468,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         out->watch_known = out->watch_set = 0;
         std::memset(out->values, 0, sizeof(out->values));
         std::uint32_t clock = 0, level = 0, clock_after = 0;
-        if (!u32(vm_clock, clock) || !u32(level_root, level)) {
-            close_process();
-            out->status = T6R_NO_PROCESS;
-            return;
-        }
+        if (!u32(g.build->vm_clock, clock) || !u32(g.build->level_root, level)) return;
         if (level != g.level || clock < g.last_clock) {
             g.level = level;
             ++g.generation;
@@ -443,7 +489,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         }
         read_watches(*out);
         if (g.complete && player_field) track_players(player_field, *out);
-        if (!u32(vm_clock, clock_after)) continue;
+        if (!u32(g.build->vm_clock, clock_after)) continue;
         if (clock_after == clock) {
             out->status = g.complete ? T6R_READY : T6R_RESOLVING;
             std::memcpy(out->map, g.map, sizeof(out->map));
