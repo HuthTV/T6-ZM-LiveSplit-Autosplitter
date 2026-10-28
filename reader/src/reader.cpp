@@ -1,0 +1,459 @@
+#define T6R_BUILD
+#include "../include/t6zm_reader.h"
+#include "fingerprint.hpp"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <tlhelp32.h>
+
+#include <cstring>
+#include <string_view>
+#include <unordered_map>
+
+namespace {
+
+constexpr std::uint32_t vm_clock = 0x2DEA810;
+constexpr std::uint32_t level_root = 0x2DEA81C;
+constexpr std::uint32_t objects_root = 0x2DEA400;
+constexpr std::uint32_t children_root = 0x2DEA480;
+constexpr std::uint32_t values_root = 0x2DEA580;
+constexpr std::uint32_t strings_root = 0x2BF2DA4;
+constexpr std::uint32_t field_names_operand = 0x5466C8;
+constexpr std::uint32_t field_name_limit_operand = 0x51A9A3;
+
+constexpr std::uint32_t object_limit = 0x8000;
+constexpr std::uint32_t child_limit = 0x40000;
+constexpr std::uint32_t chain_limit = 8192;
+
+enum : std::uint8_t { tag_object = 1, tag_string = 2, tag_int = 7 };
+enum : std::uint32_t { type_struct = 18, type_entity = 20, type_array = 21 };
+
+constexpr ULONGLONG attach_interval_ms = 1000;
+constexpr ULONGLONG resolve_interval_ms = 250;
+constexpr int sample_attempts = 4;
+
+struct child {
+    std::uint32_t payload;
+    std::uint8_t tag;
+    std::uint32_t key;
+    std::uint16_t owner;
+    std::uint32_t next;
+    std::uint32_t prev;
+};
+
+enum class watch_kind { flag, field };
+
+struct watch_def {
+    watch_kind kind;
+    const char* name;
+};
+
+constexpr watch_def test_box[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::flag, "chest_has_been_used"}};
+constexpr watch_def rounds[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::field, "round_number"}, {watch_kind::field, "round_start_time"}};
+
+struct profile_def {
+    const watch_def* watches;
+    std::uint32_t count;
+    const char* player_field = nullptr;
+};
+
+constexpr std::uint32_t max_players = 4;
+constexpr std::uint32_t player_values = 1;
+
+constexpr watch_def pack_a_punch[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
+
+#if __has_include("t6r_extra_profiles.inc")
+#include "t6r_extra_profiles.inc"
+#else
+#define T6R_EXTRA_PROFILES
+#endif
+constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"} T6R_EXTRA_PROFILES};
+constexpr std::uint32_t max_watches = T6R_MAX_WATCHES;
+
+struct watch_slot {
+    std::uint32_t child = 0;
+    std::uint32_t key = 0;
+    std::uint32_t owner = 0;
+    bool known = false;
+};
+
+struct player_track {
+    std::uint32_t entity = 0;
+    std::uint32_t head = 0;
+    bool present = false;
+    std::unordered_map<std::uint32_t, std::uint32_t> known;
+};
+
+struct state {
+    HANDLE process = nullptr;
+    bool unsupported = false;
+    ULONGLONG next_attach = 0;
+
+    std::uint32_t profile = 0xFFFFFFFF;
+    std::uint32_t level = 0;
+    std::uint32_t generation = 0;
+    std::uint32_t last_clock = 0;
+    std::uint32_t objects = 0, children = 0, values = 0, strings = 0;
+    std::uint32_t flag_array = 0;
+    ULONGLONG next_resolve = 0;
+    bool complete = false;
+    char map[32] = {};
+    watch_slot watches[max_watches];
+
+    std::uint32_t field_names = 0, field_name_limit = 0;
+    std::uint32_t players_child = 0, players_array = 0;
+    std::uint32_t players_bounds[2] = {};
+    std::uint32_t player_count = 0;
+    std::uint32_t player_field_key = 0;
+    bool players_ok = false;
+    player_track players[max_players];
+} g;
+
+bool read(std::uint32_t address, void* out, std::size_t size) {
+    SIZE_T done = 0;
+    return address >= 0x10000 && ReadProcessMemory(g.process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(address)), out, size, &done) && done == size;
+}
+
+bool u32(std::uint32_t address, std::uint32_t& out) { return read(address, &out, 4); }
+
+bool text(std::uint32_t address, char* out, std::size_t capacity) {
+    std::size_t length = 0;
+    while (length + 1 < capacity) {
+        char chunk[16];
+        std::size_t got = sizeof(chunk);
+        if (!read(address + static_cast<std::uint32_t>(length), chunk, got)) {
+            got = 1;
+            if (!read(address + static_cast<std::uint32_t>(length), chunk, got)) return false;
+        }
+        for (std::size_t i = 0; i < got && length + 1 < capacity; ++i) {
+            if (chunk[i] == 0) {
+                out[length] = 0;
+                return true;
+            }
+            if (chunk[i] < 32 || chunk[i] > 126) return false;
+            out[length++] = chunk[i];
+        }
+    }
+    return false;
+}
+
+bool text_equals(std::uint32_t address, std::string_view expected) {
+    char buffer[64];
+    return expected.size() < sizeof(buffer) && text(address, buffer, sizeof(buffer)) && expected == buffer;
+}
+
+bool read_child(std::uint32_t index, child& out) {
+    std::uint8_t raw[28];
+    if (index == 0 || index >= child_limit || !read(g.values + index * 28, raw, sizeof(raw))) return false;
+    std::memcpy(&out.payload, raw, 4);
+    out.tag = raw[12];
+    std::uint16_t high = 0;
+    std::memcpy(&high, raw + 16, 2);
+    out.key = raw[13] + (static_cast<std::uint32_t>(high) << 8);
+    std::memcpy(&out.owner, raw + 18, 2);
+    std::memcpy(&out.next, raw + 20, 4);
+    std::memcpy(&out.prev, raw + 24, 4);
+    return true;
+}
+
+bool object_type(std::uint32_t id, std::uint32_t& type) {
+    std::uint32_t word = 0;
+    if (id == 0 || id >= object_limit || !u32(g.objects + id * 8 + 4, word)) return false;
+    type = word & 0x7F;
+    return true;
+}
+
+void close_process() {
+    if (g.process) CloseHandle(g.process);
+    const ULONGLONG next_attach = g.next_attach;
+    const std::uint32_t generation = g.generation;
+    g = state{};
+    g.next_attach = next_attach;
+    g.generation = generation;
+}
+
+bool fingerprint_matches(HANDLE process) {
+    for (const auto& region : t6r::fingerprint::regions) {
+        std::uint8_t live[0x100];
+        SIZE_T done = 0;
+        if (region.size > sizeof(live) || !ReadProcessMemory(process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(region.address)), live, region.size, &done) || done != region.size || std::memcmp(live, region.bytes, region.size) != 0) return false;
+    }
+    return true;
+}
+
+void attach() {
+    const ULONGLONG now = GetTickCount64();
+    if (now < g.next_attach) return;
+    g.next_attach = now + attach_interval_ms;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W entry{sizeof(entry)};
+    g.unsupported = false;
+    for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
+        if (_wcsicmp(entry.szExeFile, L"plutonium-bootstrapper-win32.exe") != 0) continue;
+        HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+        if (!process) continue;
+        if (fingerprint_matches(process)) {
+            g.process = process;
+            g.unsupported = false;
+            break;
+        }
+        CloseHandle(process);
+        g.unsupported = true;
+    }
+    CloseHandle(snapshot);
+}
+
+void forget_players() {
+    g.players_child = g.players_array = g.player_count = g.player_field_key = 0;
+    g.players_bounds[0] = g.players_bounds[1] = 0;
+    g.players_ok = false;
+    for (auto& player : g.players) player = player_track{};
+}
+
+void forget_level() {
+    forget_players();
+    g.flag_array = 0;
+    g.complete = false;
+    g.next_resolve = 0;
+    g.map[0] = 0;
+    for (auto& slot : g.watches) slot = watch_slot{};
+}
+
+void resolve(std::uint32_t level) {
+    g.next_resolve = GetTickCount64() + resolve_interval_ms;
+    std::uint32_t objects = 0, children = 0, values = 0, strings = 0, field_names = 0, field_name_limit = 0;
+    if (!u32(objects_root, objects) || !u32(children_root, children) || !u32(values_root, values) || !u32(strings_root, strings)) return;
+    if (!u32(field_names_operand, field_names) || !u32(field_name_limit_operand, field_name_limit) || field_names < 0x10000 || field_name_limit <= 1 || field_name_limit > 0x10000) return;
+    g.objects = objects, g.children = children, g.values = values, g.strings = strings;
+
+    std::uint32_t type = 0;
+    if (!object_type(level, type) || (type != type_struct && type != type_entity)) return;
+
+    const profile_def& profile = profiles[g.profile];
+    watch_slot found[max_watches] = {};
+    std::uint32_t bounds[2] = {};
+    if (!read(children + level * 8, bounds, sizeof(bounds))) return;
+    std::uint32_t flag_array = 0, players_child = 0, players_array = 0, current = bounds[0], previous = 0, steps = 0;
+    char map[32] = {};
+    while (current != 0) {
+        child c{};
+        if (++steps > chain_limit || !read_child(current, c) || c.owner != level || c.prev != previous) return;
+        std::uint32_t name_pointer = 0;
+        char name[64];
+        if (c.key > 0 && c.key < field_name_limit && u32(field_names + c.key * 4, name_pointer) && name_pointer != 0 && text(name_pointer, name, sizeof(name))) {
+            if (c.tag == tag_object && std::strcmp(name, "flag") == 0) flag_array = c.payload;
+            else if (c.tag == tag_object && std::strcmp(name, "players") == 0) players_child = current, players_array = c.payload;
+            else if (c.tag == tag_string && std::strcmp(name, "script") == 0 && c.payload < child_limit) text(strings + c.payload * 24 + 4, map, sizeof(map));
+            else if (c.tag == tag_int)
+                for (std::uint32_t i = 0; i < profile.count; ++i)
+                    if (profile.watches[i].kind == watch_kind::field && std::strcmp(name, profile.watches[i].name) == 0) found[i] = {current, c.key, level, true};
+        }
+        previous = current;
+        current = c.next;
+    }
+    if (previous != bounds[1] || !flag_array || !object_type(flag_array, type) || type != type_array) return;
+
+    if (!read(children + flag_array * 8, bounds, sizeof(bounds))) return;
+    current = bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > chain_limit || !read_child(current, c) || c.owner != flag_array || c.prev != previous) return;
+        if (c.key > 0 && c.key < child_limit) {
+            char name[64];
+            if (text(strings + c.key * 24 + 4, name, sizeof(name)))
+                for (std::uint32_t i = 0; i < profile.count; ++i)
+                    if (profile.watches[i].kind == watch_kind::flag && std::strcmp(name, profile.watches[i].name) == 0) found[i] = {current, c.key, flag_array, true};
+        }
+        previous = current;
+        current = c.next;
+    }
+    std::uint32_t level_after = 0, objects_after = 0;
+    if (previous != bounds[1] || !u32(level_root, level_after) || level_after != level || !u32(objects_root, objects_after) || objects_after != objects) return;
+
+    g.flag_array = flag_array;
+    g.field_names = field_names, g.field_name_limit = field_name_limit;
+    g.players_child = players_child, g.players_array = players_array;
+    std::memcpy(g.map, map, sizeof(map));
+    g.complete = true;
+    for (std::uint32_t i = 0; i < profile.count; ++i) {
+        g.watches[i] = found[i];
+        g.complete = g.complete && found[i].known;
+    }
+}
+
+bool field_name(std::uint32_t key, char* out, std::size_t capacity) {
+    std::uint32_t pointer = 0;
+    return key > 0 && key < g.field_name_limit && u32(g.field_names + key * 4, pointer) && pointer != 0 && text(pointer, out, capacity);
+}
+
+bool is_player_field(std::uint32_t key, const char* wanted) {
+    if (g.player_field_key) return key == g.player_field_key;
+    char name[64];
+    if (!field_name(key, name, sizeof(name)) || std::strcmp(name, wanted) != 0) return false;
+    g.player_field_key = key;
+    return true;
+}
+
+bool scan_player(player_track& player, const char* wanted) {
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + player.entity * 8, bounds, sizeof(bounds))) return false;
+    player.known.clear();
+    player.present = false;
+    std::uint32_t current = bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > chain_limit || !read_child(current, c) || c.owner != player.entity || c.prev != previous) return false;
+        player.known[current] = c.key;
+        if (is_player_field(c.key, wanted)) player.present = true;
+        previous = current;
+        current = c.next;
+    }
+    player.head = bounds[0];
+    return previous == bounds[1];
+}
+
+void resolve_players(const char* wanted) {
+    for (auto& player : g.players) player = player_track{};
+    g.players_ok = false;
+    g.player_count = 0;
+    std::uint32_t type = 0;
+    if (!g.players_array || !object_type(g.players_array, type) || type != type_array) return;
+    if (!read(g.children + g.players_array * 8, g.players_bounds, sizeof(g.players_bounds))) return;
+    std::uint32_t current = g.players_bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > 64 || !read_child(current, c) || c.owner != g.players_array || c.prev != previous) return;
+        const std::uint32_t slot = c.key - 0x800000;
+        if (c.tag == tag_object && slot < max_players) {
+            g.players[slot].entity = c.payload;
+            if (!scan_player(g.players[slot], wanted)) return;
+        }
+        ++g.player_count;
+        previous = current;
+        current = c.next;
+    }
+    g.players_ok = previous == g.players_bounds[1];
+}
+
+void track_players(const char* wanted, t6r_sample& out) {
+    child field{};
+    if (!read_child(g.players_child, field) || field.owner != g.level || field.tag != tag_object || field.payload != g.players_array) {
+        g.complete = false;
+        g.next_resolve = 0;
+        return;
+    }
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + g.players_array * 8, bounds, sizeof(bounds))) return;
+    if (!g.players_ok || bounds[0] != g.players_bounds[0] || bounds[1] != g.players_bounds[1]) {
+        resolve_players(wanted);
+        if (!g.players_ok) return;
+    }
+    for (std::uint32_t slot = 0; slot < max_players; ++slot) {
+        player_track& player = g.players[slot];
+        if (!player.entity) continue;
+        std::uint32_t head[2] = {};
+        if (!read(g.children + player.entity * 8, head, sizeof(head))) return;
+        if (head[0] != player.head) {
+            std::uint32_t current = head[0], steps = 0;
+            for (; current != 0 && steps < 64; ++steps) {
+                child c{};
+                if (!read_child(current, c) || c.owner != player.entity) break;
+                auto seen = player.known.find(current);
+                if (seen != player.known.end() && seen->second == c.key) break;
+                player.known[current] = c.key;
+                if (is_player_field(c.key, wanted)) player.present = true;
+                current = c.next;
+            }
+            if (steps >= 64 && !scan_player(player, wanted)) return;
+            player.head = head[0];
+        }
+        out.values[player_values + slot] = player.present ? 1 : 0;
+        out.watch_known |= 1u << (player_values + slot);
+    }
+    out.values[player_values + max_players] = static_cast<std::int32_t>(g.player_count);
+    out.watch_known |= 1u << (player_values + max_players);
+}
+
+void read_watches(t6r_sample& out) {
+    const profile_def& profile = profiles[g.profile];
+    for (std::uint32_t i = 0; i < profile.count; ++i) {
+        watch_slot& slot = g.watches[i];
+        if (!slot.known) continue;
+        child c{};
+        if (!read_child(slot.child, c) || c.owner != slot.owner || c.key != slot.key || c.tag != tag_int) {
+            slot.known = false;
+            g.complete = false;
+            g.next_resolve = 0;
+            continue;
+        }
+        out.watch_known |= 1u << i;
+        out.values[i] = static_cast<std::int32_t>(c.payload);
+        if (c.payload != 0) out.watch_set |= 1u << i;
+    }
+}
+
+}
+
+T6R_API int t6r_api_version(void) { return T6R_API_VERSION; }
+
+T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
+    if (!out) return;
+    std::memset(out, 0, sizeof(*out));
+    if (profile >= sizeof(profiles) / sizeof(profiles[0])) return;
+
+    if (g.process && WaitForSingleObject(g.process, 0) != WAIT_TIMEOUT) close_process();
+    if (!g.process) attach();
+    if (!g.process) {
+        out->status = g.unsupported ? T6R_UNSUPPORTED : T6R_NO_PROCESS;
+        return;
+    }
+    if (g.profile != profile) {
+        g.profile = profile;
+        forget_level();
+    }
+
+    for (int attempt = 0; attempt < sample_attempts; ++attempt) {
+        out->status = T6R_NO_LEVEL;
+        out->watch_known = out->watch_set = 0;
+        std::memset(out->values, 0, sizeof(out->values));
+        std::uint32_t clock = 0, level = 0, clock_after = 0;
+        if (!u32(vm_clock, clock) || !u32(level_root, level)) {
+            close_process();
+            out->status = T6R_NO_PROCESS;
+            return;
+        }
+        if (level != g.level || clock < g.last_clock) {
+            g.level = level;
+            ++g.generation;
+            forget_level();
+        }
+        g.last_clock = clock;
+        out->clock = clock;
+        out->generation = g.generation;
+        if (level == 0 || level >= object_limit) return;
+
+        const char* player_field = profiles[g.profile].player_field;
+        if (!g.complete && GetTickCount64() >= g.next_resolve) {
+            resolve(level);
+            if (g.complete && player_field) {
+                resolve_players(player_field);
+                g.complete = g.players_ok;
+            }
+        }
+        read_watches(*out);
+        if (g.complete && player_field) track_players(player_field, *out);
+        if (!u32(vm_clock, clock_after)) continue;
+        if (clock_after == clock) {
+            out->status = g.complete ? T6R_READY : T6R_RESOLVING;
+            std::memcpy(out->map, g.map, sizeof(out->map));
+            return;
+        }
+        ++out->retries;
+    }
+    out->status = T6R_RESOLVING;
+    out->watch_known = out->watch_set = 0;
+    std::memset(out->values, 0, sizeof(out->values));
+}
+
+T6R_API void t6r_close(void) { close_process(); }

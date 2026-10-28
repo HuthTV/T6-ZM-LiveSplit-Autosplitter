@@ -1,0 +1,5 @@
+build/
+component/bin/
+component/obj/
+*.user
+.vs/

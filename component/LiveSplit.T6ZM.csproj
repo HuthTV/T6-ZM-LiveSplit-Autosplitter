@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net481</TargetFramework>
+    <AssemblyName>LiveSplit.T6ZM</AssemblyName>
+    <RootNamespace>LiveSplit.T6ZM</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>0.1.0</Version>
+    <!-- LiveSplit install used only as compile references; override with -p:LiveSplitDir=... -->
+    <LiveSplitDir Condition="'$(LiveSplitDir)' == ''">$(USERPROFILE)\Desktop\LS</LiveSplitDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LiveSplit.Core" HintPath="$(LiveSplitDir)\LiveSplit.Core.dll" Private="false" />
+    <Reference Include="UpdateManager" HintPath="$(LiveSplitDir)\UpdateManager.dll" Private="false" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+</Project>
