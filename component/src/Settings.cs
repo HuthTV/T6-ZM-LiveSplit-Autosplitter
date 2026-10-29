@@ -32,7 +32,7 @@ namespace LiveSplit.T6ZM
         {
             "Starts on player control. Splits when each chosen round is reached; the split timings below decide the exact moment.",
             "Starts on player control. Splits once, when any player takes a Pack-a-Punched weapon from the machine.",
-            "Starts on player control. Splits when each ticked buildable is built, in any order, so the splits file can be ordered as you like. The run ends when everything on the map's list is built, and that last one always splits.",
+            "Starts on player control. Splits when each ticked buildable is built, in any order, so the splits file can be ordered as you like. The run ends when everything required on the map's list is built (Buried's sidequest items are optional), and that last one always splits.",
             "Solo only. Starts on player control. Splits the first time each ticked step is reached, in any order; the last step always splits and ends the run. Buried: every perk up to 7. Origins: the golden shovel, each perk bottle from a red dig (an extra perk slot), then 8 perks.",
             "Starts on player control. Splits on the first box use.",
         };
