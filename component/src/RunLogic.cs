@@ -21,8 +21,34 @@ namespace LiveSplit.T6ZM
     internal abstract class RunLogic
     {
         protected const int BlackscreenWatch = 0;
+        protected const int CorpseWatch = 6;
+        const uint AfterlifeUnfreezeTicks = 30;
 
         public abstract ReaderProfile Profile { get; }
+
+        public uint? PendingStart { get; private set; }
+        public uint PendingGeneration { get; private set; }
+
+        protected bool BlackscreenEnded(GameEvent e)
+        {
+            if (Became(e, CorpseWatch) && PendingStart == null)
+            {
+                PendingStart = e.Clock + AfterlifeUnfreezeTicks;
+                PendingGeneration = e.Generation;
+            }
+            return Became(e, BlackscreenWatch);
+        }
+
+        public void NewLevel() => PendingStart = null;
+
+        public TimerAction StartRun(uint tick)
+        {
+            PendingStart = null;
+            Reset();
+            return new TimerAction(true, tick, "start");
+        }
+
+        protected abstract void Reset();
 
         public abstract IEnumerable<TimerAction> OnChange(GameEvent e, bool running);
 
@@ -39,17 +65,18 @@ namespace LiveSplit.T6ZM
 
         public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
         {
-            if (!running && Became(e, BlackscreenWatch))
+            if (!running)
             {
-                split = false;
-                yield return new TimerAction(true, e.Clock, "start");
+                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
             }
-            else if (running && !split && Became(e, 1))
+            else if (!split && Became(e, 1))
             {
                 split = true;
                 yield return new TimerAction(false, e.Clock, "box hit");
             }
         }
+
+        protected override void Reset() => split = false;
 
         public override string Next => split ? "done" : "first box use";
     }
@@ -64,17 +91,18 @@ namespace LiveSplit.T6ZM
 
         public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
         {
-            if (!running && Became(e, BlackscreenWatch))
+            if (!running)
             {
-                split = false;
-                yield return new TimerAction(true, e.Clock, "start");
+                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
             }
-            else if (running && !split && e.Watch >= FirstSlotWatch && e.Watch < FirstSlotWatch + 4 && Became(e, e.Watch))
+            else if (!split && e.Watch >= FirstSlotWatch && e.Watch < FirstSlotWatch + 4 && Became(e, e.Watch))
             {
                 split = true;
                 yield return new TimerAction(false, e.Clock, $"player {e.Watch - FirstSlotWatch + 1} pack-a-punch");
             }
         }
+
+        protected override void Reset() => split = false;
 
         public override string Next => split ? "done" : "a player takes a PaP weapon";
     }
@@ -149,13 +177,7 @@ namespace LiveSplit.T6ZM
         {
             if (!running)
             {
-                if (Became(e, BlackscreenWatch))
-                {
-                    reached.Clear();
-                    roundStarts.Clear();
-                    released = 0;
-                    yield return new TimerAction(true, e.Clock, "start");
-                }
+                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
                 yield break;
             }
 
@@ -166,6 +188,13 @@ namespace LiveSplit.T6ZM
                 roundStarts.Add(e.Clock);
 
             foreach (TimerAction action in Release()) yield return action;
+        }
+
+        protected override void Reset()
+        {
+            reached.Clear();
+            roundStarts.Clear();
+            released = 0;
         }
 
         public IEnumerable<TimerAction> Release()

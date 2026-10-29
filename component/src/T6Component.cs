@@ -77,12 +77,14 @@ namespace LiveSplit.T6ZM
                 if (Running) foreach (TimerAction action in rounds.Release()) pending.Enqueue(action);
             }
 
+            ReaderSample sample = watcher.Latest;
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
                 if (e.Kind == GameEventKind.NewLevel)
                 {
                     if (settings.AutoReset && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
                     pending.Clear();
+                    logic.NewLevel();
                     continue;
                 }
                 if (Running && e.Generation != startGeneration) continue;
@@ -93,7 +95,10 @@ namespace LiveSplit.T6ZM
                 }
             }
 
-            ReaderSample sample = watcher.Latest;
+            if (state.CurrentPhase == TimerPhase.NotRunning && logic.PendingStart is uint due
+                && sample.Generation == logic.PendingGeneration && sample.Status >= ReaderStatus.Resolving && sample.Clock >= due)
+                Start(logic.StartRun(due), sample.Generation);
+
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
             while (live && Running && pending.Count > 0 && pending.Peek().Tick <= sample.Clock)
             {
@@ -148,7 +153,7 @@ namespace LiveSplit.T6ZM
         {
             switch (state.CurrentPhase)
             {
-                case TimerPhase.NotRunning: return "start: black screen ends";
+                case TimerPhase.NotRunning: return logic.PendingStart.HasValue ? "start: afterlife unfreeze" : "start: black screen ends";
                 case TimerPhase.Running: return startClock.HasValue ? logic.Next : "started manually, no game time";
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }

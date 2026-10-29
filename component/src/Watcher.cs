@@ -66,7 +66,6 @@ namespace LiveSplit.T6ZM
                 {
                     ReaderProfile wanted = profile;
                     ReaderSample sample = Reader.Poll(wanted);
-                    lock (gate) latest = sample;
                     if (wanted != current)
                     {
                         current = wanted;
@@ -90,6 +89,7 @@ namespace LiveSplit.T6ZM
                             lastClock[i] = sample.Clock;
                         }
                     }
+                    lock (gate) latest = sample;
                     Thread.Sleep(1);
                 }
             }
