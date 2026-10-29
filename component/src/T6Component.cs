@@ -86,6 +86,7 @@ namespace LiveSplit.T6ZM
 
             ReaderSample sample = watcher.Latest;
             (logic as BuildablesLogic)?.SetMap(sample.Map);
+            (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : 0);
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
@@ -166,6 +167,8 @@ namespace LiveSplit.T6ZM
                     ReaderSample latest = watcher.Latest;
                     if (latest.Status >= ReaderStatus.Resolving && !string.IsNullOrEmpty(latest.Map) && !logic.SupportsMap(latest.Map))
                         return $"waiting for start: {latest.Map} not supported";
+                    if (latest.Status >= ReaderStatus.Resolving && logic.StartBlocked is string blocked)
+                        return $"waiting for start: {blocked}";
                     return "start: player control";
                 case TimerPhase.Running: return startClock.HasValue ? logic.Next : "started manually, no game time";
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";

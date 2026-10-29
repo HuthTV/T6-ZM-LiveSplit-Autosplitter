@@ -23,6 +23,7 @@ enum t6r_profile {
     T6R_PROFILE_ROUNDS = 1,
     T6R_PROFILE_PACK_A_PUNCH = 2,
     T6R_PROFILE_BUILDABLES = 3,
+    T6R_PROFILE_RAINBOW = 4,
 };
 
 #pragma pack(push, 4)

@@ -74,10 +74,15 @@ struct profile_def {
     std::uint32_t count;
     const char* player_field = nullptr;
     bool built_set = false;
+    const char* player_ints[2] = {};
+    const char* player_array = nullptr;
+    const char* array_key = nullptr;
 };
 
 constexpr std::uint32_t max_players = 4;
 constexpr std::uint32_t player_values = 1;
+constexpr std::uint32_t int_values = 1;
+constexpr std::uint32_t array_value = 3;
 
 constexpr watch_def pack_a_punch[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
 
@@ -89,7 +94,10 @@ constexpr watch_def pack_a_punch[] = {{watch_kind::flag, "initial_blackscreen_pa
 constexpr watch_def buildables[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
 constexpr std::uint32_t built_value = 1;
 
-constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true} T6R_EXTRA_PROFILES};
+constexpr watch_def rainbow[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
+
+constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
+                                    {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"} T6R_EXTRA_PROFILES};
 
 struct built_map {
     const char* map;
@@ -124,6 +132,8 @@ struct player_track {
     std::uint32_t entity = 0;
     std::uint32_t head = 0;
     std::uint32_t bits = 0;
+    std::uint32_t int_child[2] = {};
+    std::uint32_t array_child = 0;
     std::unordered_map<std::uint32_t, std::uint32_t> known;
 };
 
@@ -150,8 +160,9 @@ struct state {
     std::uint32_t players_child = 0, players_array = 0;
     std::uint32_t players_bounds[2] = {};
     std::uint32_t player_count = 0;
-    const char* wanted[2] = {};
-    std::uint32_t wanted_keys[2] = {};
+    const char* wanted[5] = {};
+    std::uint32_t wanted_keys[5] = {};
+    std::unordered_map<std::uint32_t, bool> array_keys;
     bool players_ok = false;
     player_track players[max_players];
     const built_map* set_map = nullptr;
@@ -272,7 +283,8 @@ void attach() {
 
 void forget_players() {
     g.players_child = g.players_array = g.player_count = 0;
-    g.wanted_keys[0] = g.wanted_keys[1] = 0;
+    for (auto& key : g.wanted_keys) key = 0;
+    g.array_keys.clear();
     g.players_bounds[0] = g.players_bounds[1] = 0;
     g.players_ok = false;
     for (auto& player : g.players) player = player_track{};
@@ -385,7 +397,7 @@ std::uint32_t field_bits(std::uint32_t key) {
     std::uint32_t bits = 0;
     char name[64];
     bool named = false;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 5; ++i) {
         if (!g.wanted[i]) continue;
         if (g.wanted_keys[i]) {
             if (key == g.wanted_keys[i]) bits |= 1u << i;
@@ -407,7 +419,41 @@ constexpr std::uint32_t corpse_value = 6;
 bool select_player_fields() {
     g.wanted[0] = profiles[g.profile].player_field;
     g.wanted[1] = std::strcmp(g.map, corpse_map) == 0 ? corpse_field : nullptr;
-    return g.wanted[0] || g.wanted[1];
+    g.wanted[2] = profiles[g.profile].player_ints[0];
+    g.wanted[3] = profiles[g.profile].player_ints[1];
+    g.wanted[4] = profiles[g.profile].player_array;
+    return g.wanted[0] || g.wanted[1] || g.wanted[2] || g.wanted[3] || g.wanted[4];
+}
+
+void note_field(player_track& player, std::uint32_t index, std::uint32_t key) {
+    player.known[index] = key;
+    const std::uint32_t bits = field_bits(key);
+    player.bits |= bits;
+    for (int i = 0; i < 2; ++i)
+        if (bits & (4u << i)) player.int_child[i] = index;
+    if (bits & 16u) player.array_child = index;
+}
+
+std::int32_t read_player_array_int(const player_track& player) {
+    child field{};
+    if (!player.array_child || !read_child(player.array_child, field) || field.owner != player.entity || field.tag != tag_object) return 0;
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + field.payload * 8, bounds, sizeof(bounds))) return 0;
+    std::uint32_t current = bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > 32 || !read_child(current, c) || c.owner != field.payload || c.prev != previous) return 0;
+        auto known = g.array_keys.find(c.key);
+        if (known == g.array_keys.end()) {
+            char name[64];
+            const bool wanted = c.key < child_limit && text(g.strings + static_cast<address_t>(c.key) * 24 + 4, name, sizeof(name)) && std::strcmp(name, profiles[g.profile].array_key) == 0;
+            known = g.array_keys.emplace(c.key, wanted).first;
+        }
+        if (known->second) return c.tag == tag_int ? static_cast<std::int32_t>(c.payload) : 0;
+        previous = current;
+        current = c.next;
+    }
+    return 0;
 }
 
 bool scan_player(player_track& player) {
@@ -415,12 +461,12 @@ bool scan_player(player_track& player) {
     if (!read(g.children + player.entity * 8, bounds, sizeof(bounds))) return false;
     player.known.clear();
     player.bits = 0;
+    player.int_child[0] = player.int_child[1] = player.array_child = 0;
     std::uint32_t current = bounds[0], previous = 0, steps = 0;
     while (current != 0) {
         child c{};
         if (++steps > chain_limit || !read_child(current, c) || c.owner != player.entity || c.prev != previous) return false;
-        player.known[current] = c.key;
-        player.bits |= field_bits(c.key);
+        note_field(player, current, c.key);
         previous = current;
         current = c.next;
     }
@@ -476,8 +522,7 @@ void track_players(t6r_sample& out) {
                 if (!read_child(current, c) || c.owner != player.entity) break;
                 auto seen = player.known.find(current);
                 if (seen != player.known.end() && seen->second == c.key) break;
-                player.known[current] = c.key;
-                player.bits |= field_bits(c.key);
+                note_field(player, current, c.key);
                 current = c.next;
             }
             if (steps >= 64 && !scan_player(player)) return;
@@ -488,8 +533,22 @@ void track_players(t6r_sample& out) {
             out.watch_known |= 1u << (player_values + slot);
         }
         if (g.wanted[1] && (player.bits & 2u)) out.values[corpse_value] |= 1 << slot;
+        if (slot == 0)
+            for (std::uint32_t i = 0; i < 2; ++i) {
+                if (!g.wanted[2 + i]) continue;
+                child field_value{};
+                std::int32_t value = 0;
+                if (player.int_child[i] && read_child(player.int_child[i], field_value) && field_value.owner == player.entity && field_value.tag == tag_int)
+                    value = static_cast<std::int32_t>(field_value.payload);
+                out.values[int_values + i] = value;
+                out.watch_known |= 1u << (int_values + i);
+            }
+        if (slot == 0 && g.wanted[4]) {
+            out.values[array_value] = read_player_array_int(player);
+            out.watch_known |= 1u << array_value;
+        }
     }
-    if (g.wanted[0]) {
+    if (g.wanted[0] || g.wanted[2] || g.wanted[3] || g.wanted[4]) {
         out.values[player_values + max_players] = static_cast<std::int32_t>(g.player_count);
         out.watch_known |= 1u << (player_values + max_players);
     }

@@ -6,7 +6,7 @@ using System.Xml;
 
 namespace LiveSplit.T6ZM
 {
-    internal enum Category { Rounds, PackAPunch, Buildables, TestBox }
+    internal enum Category { Rounds, PackAPunch, Buildables, Rainbow, TestBox }
 
     internal sealed class Settings : UserControl
     {
@@ -33,6 +33,7 @@ namespace LiveSplit.T6ZM
             "Starts on player control. Splits when each chosen round is reached; the split timings below decide the exact moment.",
             "Starts on player control. Splits once, when any player takes a Pack-a-Punched weapon from the machine.",
             "Starts on player control. Splits when each ticked buildable is built, in any order, so the splits file can be ordered as you like. The run ends when everything on the map's list is built, and that last one always splits.",
+            "Solo only. Starts on player control. Splits the first time each ticked step is reached, in any order; the last step always splits and ends the run. Buried: every perk up to 7. Origins: the golden shovel, each perk bottle from a red dig (an extra perk slot), then 8 perks.",
             "Starts on player control. Splits on the first box use.",
         };
         readonly ComboBox buildMap = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
@@ -40,14 +41,18 @@ namespace LiveSplit.T6ZM
         readonly Label buildNote = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(386, 0), ForeColor = System.Drawing.SystemColors.GrayText, Margin = new Padding(3, 4, 3, 0) };
         readonly TableLayoutPanel buildPanel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
         readonly Dictionary<string, uint> buildChosen = new Dictionary<string, uint>();
+        readonly ComboBox rainbowMap = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+        readonly CheckedListBox rainbowChecks = new CheckedListBox { CheckOnClick = true, IntegralHeight = false, Width = 386, Margin = Padding.Empty };
+        readonly TableLayoutPanel rainbowPanel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        readonly Dictionary<string, uint> rainbowChosen = new Dictionary<string, uint>();
         readonly TableLayoutPanel roundsPanel = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
 
         readonly HashSet<int> selected = new HashSet<int>(Every(1));
-        bool loading, filling, locked, onBuildables;
+        bool loading, filling, locked, onMapPage;
 
         public Settings()
         {
-            category.Items.AddRange(new object[] { "Round speedrun", "Pack-a-Punch", "Buildables", "Test: first box hit" });
+            category.Items.AddRange(new object[] { "Round speedrun", "Pack-a-Punch", "Buildables", "Rainbow Perk (solo)", "Test: first box hit" });
             buildMap.Items.AddRange(BuildableMaps.All.Select(m => (object)m.Name).ToArray());
             buildMap.SelectedIndex = 0;
             buildPanel.Controls.Add(Row(Caption("Map:"), buildMap));
@@ -55,6 +60,12 @@ namespace LiveSplit.T6ZM
             buildPanel.Controls.Add(buildChecks);
             buildPanel.Controls.Add(buildNote);
             buildChecks.Height = buildChecks.ItemHeight * 11 + (buildChecks.Height - buildChecks.ClientSize.Height);
+            rainbowMap.Items.AddRange(RainbowMaps.All.Select(m => (object)m.Name).ToArray());
+            rainbowMap.SelectedIndex = 0;
+            rainbowPanel.Controls.Add(Row(Caption("Map:"), rainbowMap));
+            rainbowPanel.Controls.Add(new Label { Text = "Split when reached:", AutoSize = true, Margin = new Padding(3, 8, 3, 0) });
+            rainbowPanel.Controls.Add(rainbowChecks);
+            rainbowChecks.Height = rainbowChecks.ItemHeight * 8 + (rainbowChecks.Height - rainbowChecks.ClientSize.Height);
             category.SelectedIndex = 0;
             lastMode.Items.AddRange(ModeNames);
             splitMode.Items.AddRange(ModeNames);
@@ -85,16 +96,20 @@ namespace LiveSplit.T6ZM
             layout.Controls.Add(description);
             layout.Controls.Add(roundsPanel);
             layout.Controls.Add(buildPanel);
+            layout.Controls.Add(rainbowPanel);
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
             layout.Controls.Add(showInfo);
             Controls.Add(layout);
             AutoSize = true;
 
-            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, buildMap })
+            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, buildMap, rainbowMap })
                 Hook(control);
             buildMap.SelectedIndexChanged += (s, e) => FillBuildables();
             buildChecks.ItemCheck += OnBuildCheck;
+            rainbowMap.SelectedIndexChanged += (s, e) => FillRainbow();
+            rainbowChecks.ItemCheck += OnRainbowCheck;
             FillBuildables();
+            FillRainbow();
             splitRounds.ItemCheck += OnItemCheck;
             FillRounds();
             Changed();
@@ -127,6 +142,7 @@ namespace LiveSplit.T6ZM
             if (Category == Category.TestBox) return new TestBoxLogic();
             if (Category == Category.PackAPunch) return new PackAPunchLogic();
             if (Category == Category.Buildables) return new BuildablesLogic(BuildableMask);
+            if (Category == Category.Rainbow) return new RainbowLogic(RainbowMask);
             return new RoundLogic(selected, (int)maxRound.Value, unlimited.Checked, (RoundMode)(splitMode.SelectedIndex + 1), (RoundMode)(lastMode.SelectedIndex + 1));
         }
 
@@ -135,6 +151,37 @@ namespace LiveSplit.T6ZM
             BuildableMap map = BuildableMaps.For(script);
             if (map == null) return 0;
             return buildChosen.TryGetValue(script, out uint mask) ? mask & map.Every : map.Required;
+        }
+
+        public uint RainbowMask(string script)
+        {
+            RainbowMap map = RainbowMaps.For(script);
+            if (map == null) return 0;
+            return rainbowChosen.TryGetValue(script, out uint mask) ? mask & map.Every : map.Every;
+        }
+
+        RainbowMap SelectedRainbowMap => RainbowMaps.All[Math.Max(0, rainbowMap.SelectedIndex)];
+
+        void FillRainbow()
+        {
+            RainbowMap map = SelectedRainbowMap;
+            uint mask = RainbowMask(map.Script);
+            filling = true;
+            rainbowChecks.BeginUpdate();
+            rainbowChecks.Items.Clear();
+            for (int i = 0; i < map.Steps.Count; i++) rainbowChecks.Items.Add(map.Steps[i].Label, (mask & (1u << i)) != 0);
+            rainbowChecks.EndUpdate();
+            filling = false;
+        }
+
+        void OnRainbowCheck(object sender, ItemCheckEventArgs e)
+        {
+            if (filling) return;
+            RainbowMap map = SelectedRainbowMap;
+            uint bit = 1u << e.Index;
+            uint mask = RainbowMask(map.Script);
+            rainbowChosen[map.Script] = e.NewValue == CheckState.Checked ? mask | bit : mask & ~bit;
+            Changed();
         }
 
         BuildableMap SelectedBuildMap => BuildableMaps.All[Math.Max(0, buildMap.SelectedIndex)];
@@ -212,11 +259,12 @@ namespace LiveSplit.T6ZM
 
         void Changed()
         {
-            bool buildables = Category == Category.Buildables;
-            bool opened = buildables && !onBuildables;
-            onBuildables = buildables;
+            bool mapPage = Category == Category.Buildables || Category == Category.Rainbow;
+            bool opened = mapPage && !onMapPage;
+            onMapPage = mapPage;
             roundsPanel.Visible = Category == Category.Rounds;
-            buildPanel.Visible = buildables;
+            buildPanel.Visible = Category == Category.Buildables;
+            rainbowPanel.Visible = Category == Category.Rainbow;
             description.Text = Descriptions[(int)Category];
             UpdateEnabled();
             FillRounds();
@@ -231,12 +279,14 @@ namespace LiveSplit.T6ZM
             if (loading) return;
             int index = Array.FindIndex(BuildableMaps.All, m => m.Script == GameMap);
             if (index >= 0 && buildMap.SelectedIndex != index) buildMap.SelectedIndex = index;
+            index = Array.FindIndex(RainbowMaps.All, m => m.Script == GameMap);
+            if (index >= 0 && rainbowMap.SelectedIndex != index) rainbowMap.SelectedIndex = index;
         }
 
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (Visible && Category == Category.Buildables) SelectGameMap();
+            if (Visible && (Category == Category.Buildables || Category == Category.Rainbow)) SelectGameMap();
         }
 
         void UpdateEnabled()
@@ -293,6 +343,11 @@ namespace LiveSplit.T6ZM
                 uint mask = BuildableMask(map.Script);
                 node.AppendChild(Element(document, "Built_" + map.Script, string.Join(",", map.Items.Where((item, i) => (mask & (1u << i)) != 0).Select(item => item.Key))));
             }
+            foreach (RainbowMap map in RainbowMaps.All)
+            {
+                uint mask = RainbowMask(map.Script);
+                node.AppendChild(Element(document, "Rainbow_" + map.Script, string.Join(",", map.Steps.Where((step, i) => (mask & (1u << i)) != 0).Select(step => step.Label))));
+            }
             node.AppendChild(Element(document, "ShowInfo", showInfo.Checked.ToString()));
             return node;
         }
@@ -323,6 +378,16 @@ namespace LiveSplit.T6ZM
                         if (chosen.Contains(map.Items[i].Key)) mask |= 1u << i;
                     buildChosen[map.Script] = mask;
                 }
+                foreach (RainbowMap map in RainbowMaps.All)
+                {
+                    string labels = node?["Rainbow_" + map.Script]?.InnerText?.Replace("Red dig ", "Bottle ");
+                    if (labels == null) continue;
+                    var chosen = new HashSet<string>(labels.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    uint mask = 0;
+                    for (int i = 0; i < map.Steps.Count; i++)
+                        if (chosen.Contains(map.Steps[i].Label)) mask |= 1u << i;
+                    rainbowChosen[map.Script] = mask;
+                }
                 showInfo.Checked = ReadBool(node, "ShowInfo", true);
             }
             finally
@@ -330,6 +395,7 @@ namespace LiveSplit.T6ZM
                 loading = false;
             }
             FillBuildables();
+            FillRainbow();
             Changed();
         }
 

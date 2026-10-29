@@ -49,6 +49,8 @@ namespace LiveSplit.T6ZM
 
         public virtual bool SupportsMap(string script) => true;
 
+        public virtual string StartBlocked => null;
+
         public TimerAction StartRun(uint tick)
         {
             PendingStart = null;
