@@ -86,6 +86,7 @@ namespace LiveSplit.T6ZM
 
             ReaderSample sample = watcher.Latest;
             (logic as BuildablesLogic)?.SetMap(sample.Map);
+            settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
                 if (e.Kind == GameEventKind.NewLevel)

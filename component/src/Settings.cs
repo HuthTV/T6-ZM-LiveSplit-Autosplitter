@@ -43,7 +43,7 @@ namespace LiveSplit.T6ZM
         readonly TableLayoutPanel roundsPanel = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
 
         readonly HashSet<int> selected = new HashSet<int>(Every(1));
-        bool loading, filling, locked;
+        bool loading, filling, locked, onBuildables;
 
         public Settings()
         {
@@ -134,7 +134,7 @@ namespace LiveSplit.T6ZM
         {
             BuildableMap map = BuildableMaps.For(script);
             if (map == null) return 0;
-            return buildChosen.TryGetValue(script, out uint mask) ? mask & map.All : map.All;
+            return buildChosen.TryGetValue(script, out uint mask) ? mask & map.Every : map.Required;
         }
 
         BuildableMap SelectedBuildMap => BuildableMaps.All[Math.Max(0, buildMap.SelectedIndex)];
@@ -212,12 +212,31 @@ namespace LiveSplit.T6ZM
 
         void Changed()
         {
+            bool buildables = Category == Category.Buildables;
+            bool opened = buildables && !onBuildables;
+            onBuildables = buildables;
             roundsPanel.Visible = Category == Category.Rounds;
-            buildPanel.Visible = Category == Category.Buildables;
+            buildPanel.Visible = buildables;
             description.Text = Descriptions[(int)Category];
             UpdateEnabled();
             FillRounds();
             if (!loading) Version++;
+            if (opened) SelectGameMap();
+        }
+
+        public string GameMap { get; set; }
+
+        void SelectGameMap()
+        {
+            if (loading) return;
+            int index = Array.FindIndex(BuildableMaps.All, m => m.Script == GameMap);
+            if (index >= 0 && buildMap.SelectedIndex != index) buildMap.SelectedIndex = index;
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible && Category == Category.Buildables) SelectGameMap();
         }
 
         void UpdateEnabled()

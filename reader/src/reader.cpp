@@ -98,9 +98,10 @@ struct built_map {
     std::uint32_t count;
 };
 
-constexpr const char* transit_names[] = {"turbine", "riotshield_zm", "turret", "electric_trap", "powerswitch", "jetgun_zm", "pap", "cattlecatcher", "bushatch", "busladder", "sq_common"};
+constexpr const char* transit_names[] = {"turbine", "riotshield_zm", "turret", "electric_trap", "powerswitch", "jetgun_zm", "pap", "cattlecatcher", "bushatch|dinerhatch", "busladder", "sq_common"};
 constexpr const char* highrise_names[] = {"springpad_zm", "slipgun_zm", "sq_common"};
-constexpr const char* buried_names[] = {"turbine", "headchopper_zm", "subwoofer_zm", "sq_common", "springpad_zm"};
+constexpr const char* buried_names[] = {"turbine", "headchopper_zm", "subwoofer_zm", "sq_common", "springpad_zm",
+                                        "buried_sq_bt_m_tower|buried_sq_bt_r_tower", "buried_sq_oillamp", "buried_sq_tpo_switch"};
 constexpr const char* prison_names[] = {"alcatraz_shield_zm", "plane", "packasplat"};
 constexpr const char* tomb_names[] = {"equip_dieseldrone_zm", "tomb_shield_zm", "elemental_staff_fire", "elemental_staff_air", "elemental_staff_lightning", "elemental_staff_water"};
 constexpr built_map built_maps[] = {
@@ -521,6 +522,17 @@ void resolve_set() {
     }
 }
 
+bool name_listed(const char* spec, const char* name) {
+    const std::size_t length = std::strlen(name);
+    for (const char* part = spec;;) {
+        const char* end = std::strchr(part, '|');
+        const std::size_t size = end ? static_cast<std::size_t>(end - part) : std::strlen(part);
+        if (size == length && std::memcmp(part, name, size) == 0) return true;
+        if (!end) return false;
+        part = end + 1;
+    }
+}
+
 void read_set(t6r_sample& out) {
     if (!g.set_array) {
         if (GetTickCount64() >= g.next_set) resolve_set();
@@ -544,7 +556,7 @@ void read_set(t6r_sample& out) {
             char name[64];
             if (c.key < child_limit && text(g.strings + static_cast<address_t>(c.key) * 24 + 4, name, sizeof(name)))
                 for (std::uint32_t i = 0; i < g.set_map->count; ++i)
-                    if (std::strcmp(name, g.set_map->names[i]) == 0) bit = static_cast<int>(i);
+                    if (name_listed(g.set_map->names[i], name)) bit = static_cast<int>(i);
             known = g.set_keys.emplace(c.key, bit).first;
         }
         if (known->second >= 0 && c.tag == tag_int && c.payload != 0) mask |= 1 << known->second;

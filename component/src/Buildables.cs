@@ -6,14 +6,16 @@ namespace LiveSplit.T6ZM
 {
     internal readonly struct Buildable
     {
-        public Buildable(string key, string label)
+        public Buildable(string key, string label, bool optional = false)
         {
             Key = key;
             Label = label;
+            Optional = optional;
         }
 
         public string Key { get; }
         public string Label { get; }
+        public bool Optional { get; }
     }
 
     internal sealed class BuildableMap
@@ -29,7 +31,17 @@ namespace LiveSplit.T6ZM
         public string Name { get; }
         public IReadOnlyList<Buildable> Items { get; }
         public string Note { get; set; }
-        public uint All => (uint)((1UL << Items.Count) - 1);
+        public uint Every => (uint)((1UL << Items.Count) - 1);
+        public uint Required
+        {
+            get
+            {
+                uint mask = 0;
+                for (int i = 0; i < Items.Count; i++)
+                    if (!Items[i].Optional) mask |= 1u << i;
+                return mask;
+            }
+        }
     }
 
     internal static class BuildableMaps
@@ -39,14 +51,19 @@ namespace LiveSplit.T6ZM
             new BuildableMap("zm_transit", "TranZit",
                 new Buildable("turbine", "Turbine"), new Buildable("riotshield_zm", "Zombie Shield"), new Buildable("turret", "Turret"),
                 new Buildable("electric_trap", "Electric Trap"), new Buildable("powerswitch", "Power Switch"),
-                new Buildable("jetgun_zm", "Thrustodyne Aeronautics Model 23"), new Buildable("pap", "Pack-a-Punch Machine"),
-                new Buildable("cattlecatcher", "Bus: cow catcher"), new Buildable("bushatch", "Bus: roof hatch"),
-                new Buildable("busladder", "Bus: ladder"), new Buildable("sq_common", "NAV Table")),
+                new Buildable("jetgun_zm", "Jetgun"), new Buildable("pap", "Pack-a-Punch"),
+                new Buildable("cattlecatcher", "Cow Catcher"), new Buildable("bushatch|dinerhatch", "Hatch"),
+                new Buildable("busladder", "Ladder"), new Buildable("sq_common", "NAV Table")),
             new BuildableMap("zm_highrise", "Die Rise",
                 new Buildable("springpad_zm", "Trample Steam"), new Buildable("slipgun_zm", "Sliquifier"), new Buildable("sq_common", "NAV Table")),
             new BuildableMap("zm_buried", "Buried",
                 new Buildable("turbine", "Turbine"), new Buildable("headchopper_zm", "Head Chopper"), new Buildable("subwoofer_zm", "Subsurface Resonator"),
-                new Buildable("sq_common", "NAV Table"), new Buildable("springpad_zm", "Trample Steam")),
+                new Buildable("sq_common", "NAV Table"), new Buildable("springpad_zm", "Trample Steam"),
+                new Buildable("buried_sq_bt_m_tower|buried_sq_bt_r_tower", "Guillotine / Gallows", optional: true),
+                new Buildable("buried_sq_oillamp", "Oil Lamp", optional: true), new Buildable("buried_sq_tpo_switch", "Switch", optional: true))
+            {
+                Note = "Guillotine / Gallows, Oil Lamp and Switch are sidequest items: they split only when chosen and are not needed to finish.",
+            },
             new BuildableMap("zm_prison", "Mob of the Dead",
                 new Buildable("alcatraz_shield_zm", "Zombie Shield"), new Buildable("plane", "Plane"), new Buildable("packasplat", "Acid Gat Kit")),
             new BuildableMap("zm_tomb", "Origins",
@@ -98,10 +115,11 @@ namespace LiveSplit.T6ZM
             }
             if (e.Watch != MaskWatch || current == null) yield break;
 
-            uint fresh = (uint)e.NewValue & ~(uint)e.OldValue & ~settled & current.All;
+            uint required = current.Required;
+            uint fresh = (uint)e.NewValue & ~(uint)e.OldValue & ~settled & current.Every;
             if (fresh == 0) yield break;
             uint pick = chosen(map);
-            int finalBit = (before & current.All) != current.All && (built & current.All) == current.All ? 31 - LeadingZeros(fresh) : -1;
+            int finalBit = (before & required) != required && (built & required) == required ? 31 - LeadingZeros(fresh & required) : -1;
             for (int bit = 0; bit < current.Items.Count; bit++)
             {
                 uint mask = 1u << bit;
@@ -118,8 +136,9 @@ namespace LiveSplit.T6ZM
             {
                 BuildableMap current = BuildableMaps.For(map);
                 if (current == null) return "map not supported";
-                int left = current.Items.Count - Count(built & current.All);
-                return left == 0 ? "done" : $"{left} of {current.Items.Count} buildables to go";
+                int total = Count(current.Required);
+                int left = total - Count(built & current.Required);
+                return left == 0 ? "done" : $"{left} of {total} buildables to go";
             }
         }
 
