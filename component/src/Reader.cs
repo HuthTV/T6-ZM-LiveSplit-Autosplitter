@@ -6,7 +6,7 @@ namespace LiveSplit.T6ZM
 {
     internal enum ReaderStatus : uint { NoProcess = 0, Unsupported = 1, NoLevel = 2, Resolving = 3, Ready = 4 }
 
-    internal enum ReaderProfile : uint { TestBox = 0, Rounds = 1, PackAPunch = 2 }
+    internal enum ReaderProfile : uint { TestBox = 0, Rounds = 1, PackAPunch = 2, Buildables = 3 }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4, CharSet = CharSet.Ansi)]
     internal struct ReaderSample

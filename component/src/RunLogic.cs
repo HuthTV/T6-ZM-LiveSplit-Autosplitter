@@ -39,7 +39,15 @@ namespace LiveSplit.T6ZM
             return Became(e, BlackscreenWatch);
         }
 
-        public void NewLevel() => PendingStart = null;
+        public void NewLevel()
+        {
+            PendingStart = null;
+            OnNewLevel();
+        }
+
+        protected virtual void OnNewLevel() { }
+
+        public virtual bool SupportsMap(string script) => true;
 
         public TimerAction StartRun(uint tick)
         {

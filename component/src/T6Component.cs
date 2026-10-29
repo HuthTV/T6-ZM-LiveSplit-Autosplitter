@@ -78,6 +78,7 @@ namespace LiveSplit.T6ZM
             }
 
             ReaderSample sample = watcher.Latest;
+            (logic as BuildablesLogic)?.SetMap(sample.Map);
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
                 if (e.Kind == GameEventKind.NewLevel)
@@ -153,7 +154,12 @@ namespace LiveSplit.T6ZM
         {
             switch (state.CurrentPhase)
             {
-                case TimerPhase.NotRunning: return logic.PendingStart.HasValue ? "start: afterlife unfreeze" : "start: black screen ends";
+                case TimerPhase.NotRunning:
+                    if (logic.PendingStart.HasValue) return "start: afterlife unfreeze";
+                    ReaderSample latest = watcher.Latest;
+                    if (latest.Status >= ReaderStatus.Resolving && !string.IsNullOrEmpty(latest.Map) && !logic.SupportsMap(latest.Map))
+                        return $"waiting for start: {latest.Map} not supported";
+                    return "start: black screen ends";
                 case TimerPhase.Running: return startClock.HasValue ? logic.Next : "started manually, no game time";
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }

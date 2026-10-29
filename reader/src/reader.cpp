@@ -73,6 +73,7 @@ struct profile_def {
     const watch_def* watches;
     std::uint32_t count;
     const char* player_field = nullptr;
+    bool built_set = false;
 };
 
 constexpr std::uint32_t max_players = 4;
@@ -85,7 +86,30 @@ constexpr watch_def pack_a_punch[] = {{watch_kind::flag, "initial_blackscreen_pa
 #else
 #define T6R_EXTRA_PROFILES
 #endif
-constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"} T6R_EXTRA_PROFILES};
+constexpr watch_def buildables[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
+constexpr std::uint32_t built_value = 1;
+
+constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true} T6R_EXTRA_PROFILES};
+
+struct built_map {
+    const char* map;
+    const char* array;
+    const char* const* names;
+    std::uint32_t count;
+};
+
+constexpr const char* transit_names[] = {"turbine", "riotshield_zm", "turret", "electric_trap", "powerswitch", "jetgun_zm", "pap", "cattlecatcher", "bushatch", "busladder", "sq_common"};
+constexpr const char* highrise_names[] = {"springpad_zm", "slipgun_zm", "sq_common"};
+constexpr const char* buried_names[] = {"turbine", "headchopper_zm", "subwoofer_zm", "sq_common", "springpad_zm"};
+constexpr const char* prison_names[] = {"alcatraz_shield_zm", "plane", "packasplat"};
+constexpr const char* tomb_names[] = {"equip_dieseldrone_zm", "tomb_shield_zm", "elemental_staff_fire", "elemental_staff_air", "elemental_staff_lightning", "elemental_staff_water"};
+constexpr built_map built_maps[] = {
+    {"zm_transit", "buildables_built", transit_names, static_cast<std::uint32_t>(std::size(transit_names))},
+    {"zm_highrise", "buildables_built", highrise_names, static_cast<std::uint32_t>(std::size(highrise_names))},
+    {"zm_buried", "buildables_built", buried_names, static_cast<std::uint32_t>(std::size(buried_names))},
+    {"zm_prison", "craftables_crafted", prison_names, static_cast<std::uint32_t>(std::size(prison_names))},
+    {"zm_tomb", "craftables_crafted", tomb_names, static_cast<std::uint32_t>(std::size(tomb_names))},
+};
 constexpr std::uint32_t max_watches = T6R_MAX_WATCHES;
 
 struct watch_slot {
@@ -129,6 +153,10 @@ struct state {
     std::uint32_t wanted_keys[2] = {};
     bool players_ok = false;
     player_track players[max_players];
+    const built_map* set_map = nullptr;
+    std::uint32_t set_child = 0, set_array = 0;
+    ULONGLONG next_set = 0;
+    std::unordered_map<std::uint32_t, int> set_keys;
 } g;
 
 bool read(address_t address, void* out, std::size_t size) {
@@ -255,6 +283,10 @@ void forget_level() {
     g.complete = false;
     g.next_resolve = 0;
     g.map[0] = 0;
+    g.set_map = nullptr;
+    g.set_child = g.set_array = 0;
+    g.next_set = 0;
+    g.set_keys.clear();
     g.time_origin = INT64_MAX;
     for (auto& slot : g.watches) slot = watch_slot{};
 }
@@ -463,6 +495,67 @@ void track_players(t6r_sample& out) {
     if (g.wanted[1]) out.watch_known |= 1u << corpse_value;
 }
 
+void resolve_set() {
+    g.next_set = GetTickCount64() + resolve_interval_ms;
+    g.set_map = nullptr;
+    for (const built_map& candidate : built_maps)
+        if (std::strcmp(g.map, candidate.map) == 0) g.set_map = &candidate;
+    if (!g.set_map || !g.level) return;
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + g.level * 8, bounds, sizeof(bounds))) return;
+    std::uint32_t current = bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > chain_limit || !read_child(current, c) || c.owner != g.level || c.prev != previous) return;
+        char name[64];
+        std::uint32_t type = 0;
+        if (c.tag == tag_object && field_name(c.key, name, sizeof(name)) && std::strcmp(name, g.set_map->array) == 0) {
+            if (object_type(c.payload, type) && type == type_array) {
+                g.set_child = current, g.set_array = c.payload;
+                g.set_keys.clear();
+            }
+            return;
+        }
+        previous = current;
+        current = c.next;
+    }
+}
+
+void read_set(t6r_sample& out) {
+    if (!g.set_array) {
+        if (GetTickCount64() >= g.next_set) resolve_set();
+        if (!g.set_array) return;
+    }
+    child field{};
+    if (!read_child(g.set_child, field) || field.owner != g.level || field.tag != tag_object || field.payload != g.set_array) {
+        g.set_array = 0;
+        return;
+    }
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + g.set_array * 8, bounds, sizeof(bounds))) return;
+    std::int32_t mask = 0;
+    std::uint32_t current = bounds[0], previous = 0, steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > 64 || !read_child(current, c) || c.owner != g.set_array || c.prev != previous) return;
+        auto known = g.set_keys.find(c.key);
+        if (known == g.set_keys.end()) {
+            int bit = -1;
+            char name[64];
+            if (c.key < child_limit && text(g.strings + static_cast<address_t>(c.key) * 24 + 4, name, sizeof(name)))
+                for (std::uint32_t i = 0; i < g.set_map->count; ++i)
+                    if (std::strcmp(name, g.set_map->names[i]) == 0) bit = static_cast<int>(i);
+            known = g.set_keys.emplace(c.key, bit).first;
+        }
+        if (known->second >= 0 && c.tag == tag_int && c.payload != 0) mask |= 1 << known->second;
+        previous = current;
+        current = c.next;
+    }
+    if (previous != bounds[1]) return;
+    out.values[built_value] = mask;
+    out.watch_known |= 1u << built_value;
+}
+
 void read_watches(t6r_sample& out) {
     const profile_def& profile = profiles[g.profile];
     for (std::uint32_t i = 0; i < profile.count; ++i) {
@@ -527,6 +620,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         }
         read_watches(*out);
         if (g.complete && select_player_fields()) track_players(*out);
+        if (g.complete && profiles[g.profile].built_set) read_set(*out);
         if (!u32(g.build->vm_clock, clock_after)) continue;
         if (timed && (!u32(g.build->engine_time, time_after) || time_after != time)) {
             ++out->retries;

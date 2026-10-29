@@ -6,7 +6,7 @@ using System.Xml;
 
 namespace LiveSplit.T6ZM
 {
-    internal enum Category { Rounds, PackAPunch, TestBox }
+    internal enum Category { Rounds, PackAPunch, Buildables, TestBox }
 
     internal sealed class Settings : UserControl
     {
@@ -33,8 +33,14 @@ namespace LiveSplit.T6ZM
         {
             "Starts when the black screen ends. Splits when each chosen round is reached; the split timings below decide the exact moment.",
             "Starts when the black screen ends. Splits once, when any player takes a Pack-a-Punched weapon from the machine.",
+            "Starts on player control. Splits when each ticked buildable is built, in any order, so the splits file can be ordered as you like. The run ends when everything on the map's list is built, and that last one always splits.",
             "Starts when the black screen ends. Splits on the first box use.",
         };
+        readonly ComboBox buildMap = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+        readonly CheckedListBox buildChecks = new CheckedListBox { CheckOnClick = true, IntegralHeight = false, Width = 386, Margin = Padding.Empty };
+        readonly Label buildNote = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(386, 0), ForeColor = System.Drawing.SystemColors.GrayText, Margin = new Padding(3, 4, 3, 0) };
+        readonly TableLayoutPanel buildPanel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        readonly Dictionary<string, uint> buildChosen = new Dictionary<string, uint>();
         readonly TableLayoutPanel roundsPanel = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
 
         readonly HashSet<int> selected = new HashSet<int>(Every(1));
@@ -42,7 +48,14 @@ namespace LiveSplit.T6ZM
 
         public Settings()
         {
-            category.Items.AddRange(new object[] { "Round speedrun", "Pack-a-Punch", "Test: first box hit" });
+            category.Items.AddRange(new object[] { "Round speedrun", "Pack-a-Punch", "Buildables", "Test: first box hit" });
+            buildMap.Items.AddRange(BuildableMaps.All.Select(m => (object)m.Name).ToArray());
+            buildMap.SelectedIndex = 0;
+            buildPanel.Controls.Add(Row(Caption("Map:"), buildMap));
+            buildPanel.Controls.Add(new Label { Text = "Split when built:", AutoSize = true, Margin = new Padding(3, 8, 3, 0) });
+            buildPanel.Controls.Add(buildChecks);
+            buildPanel.Controls.Add(buildNote);
+            buildChecks.Height = buildChecks.ItemHeight * 11 + (buildChecks.Height - buildChecks.ClientSize.Height);
             category.SelectedIndex = 0;
             lastMode.Items.AddRange(ModeNames);
             splitMode.Items.AddRange(ModeNames);
@@ -72,14 +85,18 @@ namespace LiveSplit.T6ZM
             layout.Controls.Add(Row(Caption("Category:"), category, blocked));
             layout.Controls.Add(description);
             layout.Controls.Add(roundsPanel);
+            layout.Controls.Add(buildPanel);
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
             layout.Controls.Add(showInfo);
             layout.Controls.Add(autoReset);
             Controls.Add(layout);
             AutoSize = true;
 
-            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, autoReset })
+            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, autoReset, buildMap })
                 Hook(control);
+            buildMap.SelectedIndexChanged += (s, e) => FillBuildables();
+            buildChecks.ItemCheck += OnBuildCheck;
+            FillBuildables();
             splitRounds.ItemCheck += OnItemCheck;
             FillRounds();
             Changed();
@@ -112,7 +129,41 @@ namespace LiveSplit.T6ZM
         {
             if (Category == Category.TestBox) return new TestBoxLogic();
             if (Category == Category.PackAPunch) return new PackAPunchLogic();
+            if (Category == Category.Buildables) return new BuildablesLogic(BuildableMask);
             return new RoundLogic(selected, (int)maxRound.Value, unlimited.Checked, (RoundMode)(splitMode.SelectedIndex + 1), (RoundMode)(lastMode.SelectedIndex + 1));
+        }
+
+        public uint BuildableMask(string script)
+        {
+            BuildableMap map = BuildableMaps.For(script);
+            if (map == null) return 0;
+            return buildChosen.TryGetValue(script, out uint mask) ? mask & map.All : map.All;
+        }
+
+        BuildableMap SelectedBuildMap => BuildableMaps.All[Math.Max(0, buildMap.SelectedIndex)];
+
+        void FillBuildables()
+        {
+            BuildableMap map = SelectedBuildMap;
+            uint mask = BuildableMask(map.Script);
+            buildNote.Text = map.Note ?? "";
+            buildNote.Visible = !string.IsNullOrEmpty(map.Note);
+            filling = true;
+            buildChecks.BeginUpdate();
+            buildChecks.Items.Clear();
+            for (int i = 0; i < map.Items.Count; i++) buildChecks.Items.Add(map.Items[i].Label, (mask & (1u << i)) != 0);
+            buildChecks.EndUpdate();
+            filling = false;
+        }
+
+        void OnBuildCheck(object sender, ItemCheckEventArgs e)
+        {
+            if (filling) return;
+            BuildableMap map = SelectedBuildMap;
+            uint bit = 1u << e.Index;
+            uint mask = BuildableMask(map.Script);
+            buildChosen[map.Script] = e.NewValue == CheckState.Checked ? mask | bit : mask & ~bit;
+            Changed();
         }
 
         static int[] Every(int step) => Enumerable.Range(2, LastRound - 1).Where(r => r % step == 0).ToArray();
@@ -165,6 +216,7 @@ namespace LiveSplit.T6ZM
         void Changed()
         {
             roundsPanel.Visible = Category == Category.Rounds;
+            buildPanel.Visible = Category == Category.Buildables;
             description.Text = Descriptions[(int)Category];
             UpdateEnabled();
             FillRounds();
@@ -220,6 +272,11 @@ namespace LiveSplit.T6ZM
             node.AppendChild(Element(document, "SplitTiming", (splitMode.SelectedIndex + 1).ToString()));
             node.AppendChild(Element(document, "LastSplitTiming", (lastMode.SelectedIndex + 1).ToString()));
             node.AppendChild(Element(document, "SplitRounds", string.Join(",", selected.OrderBy(r => r))));
+            foreach (BuildableMap map in BuildableMaps.All)
+            {
+                uint mask = BuildableMask(map.Script);
+                node.AppendChild(Element(document, "Built_" + map.Script, string.Join(",", map.Items.Where((item, i) => (mask & (1u << i)) != 0).Select(item => item.Key))));
+            }
             node.AppendChild(Element(document, "ShowInfo", showInfo.Checked.ToString()));
             node.AppendChild(Element(document, "AutoReset", autoReset.Checked.ToString()));
             return node;
@@ -241,6 +298,16 @@ namespace LiveSplit.T6ZM
                     selected.Clear();
                     selected.UnionWith(rounds.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => int.TryParse(s, out int r) ? r : 0).Where(r => r >= 2 && r <= LastRound));
                 }
+                foreach (BuildableMap map in BuildableMaps.All)
+                {
+                    string keys = node?["Built_" + map.Script]?.InnerText;
+                    if (keys == null) continue;
+                    var chosen = new HashSet<string>(keys.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    uint mask = 0;
+                    for (int i = 0; i < map.Items.Count; i++)
+                        if (chosen.Contains(map.Items[i].Key)) mask |= 1u << i;
+                    buildChosen[map.Script] = mask;
+                }
                 showInfo.Checked = ReadBool(node, "ShowInfo", true);
                 autoReset.Checked = ReadBool(node, "AutoReset", true);
             }
@@ -248,6 +315,7 @@ namespace LiveSplit.T6ZM
             {
                 loading = false;
             }
+            FillBuildables();
             Changed();
         }
 
