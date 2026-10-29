@@ -27,11 +27,12 @@ struct build_def {
     bool names_from_operands;
     address_t field_names, field_name_limit;
     bool strings_indirect;
+    address_t engine_time = 0;
 };
 
 constexpr build_def builds[] = {
     {L"plutonium-bootstrapper-win32.exe", t6r::fingerprint::plutonium::regions, std::size(t6r::fingerprint::plutonium::regions), 4,
-     0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true},
+     0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true, 0x2338F18},
     {L"t6zm.exe", t6r::fingerprint::steam::regions, std::size(t6r::fingerprint::steam::regions), 4,
      0x2D3A910, 0x2D3A91C, 0x2D3A500, 0x2D3A580, 0x2D3A680, 0x2B42EA4, true, 0x7E1180, 0x7E115B, true},
     {L"t6zm.exe", t6r::fingerprint::store::regions, std::size(t6r::fingerprint::store::regions), 8,
@@ -111,6 +112,7 @@ struct state {
     std::uint32_t level = 0;
     std::uint32_t generation = 0;
     std::uint32_t last_clock = 0;
+    std::int64_t time_origin = INT64_MAX;
     address_t objects = 0, children = 0, values = 0, strings = 0;
     std::uint32_t flag_array = 0;
     ULONGLONG next_resolve = 0;
@@ -253,7 +255,14 @@ void forget_level() {
     g.complete = false;
     g.next_resolve = 0;
     g.map[0] = 0;
+    g.time_origin = INT64_MAX;
     for (auto& slot : g.watches) slot = watch_slot{};
+}
+
+std::uint32_t frame_tick(std::uint32_t clock, std::uint32_t engine_time) {
+    const std::int64_t delta = std::int64_t{engine_time} - 50 * std::int64_t{clock};
+    if (delta < g.time_origin) g.time_origin = delta;
+    return delta - g.time_origin == 50 ? clock + 1 : clock;
 }
 
 void resolve(std::uint32_t level) {
@@ -496,7 +505,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         out->status = T6R_NO_LEVEL;
         out->watch_known = out->watch_set = 0;
         std::memset(out->values, 0, sizeof(out->values));
-        std::uint32_t clock = 0, level = 0, clock_after = 0;
+        std::uint32_t clock = 0, level = 0, clock_after = 0, time = 0, time_after = 0;
         if (!u32(g.build->vm_clock, clock) || !u32(g.build->level_root, level)) return;
         if (level != g.level || clock < g.last_clock) {
             g.level = level;
@@ -505,6 +514,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         }
         g.last_clock = clock;
         out->clock = clock;
+        const bool timed = g.build->engine_time && u32(g.build->engine_time, time);
         out->generation = g.generation;
         if (level == 0 || level >= object_limit) return;
 
@@ -518,7 +528,12 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         read_watches(*out);
         if (g.complete && select_player_fields()) track_players(*out);
         if (!u32(g.build->vm_clock, clock_after)) continue;
+        if (timed && (!u32(g.build->engine_time, time_after) || time_after != time)) {
+            ++out->retries;
+            continue;
+        }
         if (clock_after == clock) {
+            if (timed) out->clock = frame_tick(clock, time);
             out->status = g.complete ? T6R_READY : T6R_RESOLVING;
             std::memcpy(out->map, g.map, sizeof(out->map));
             return;

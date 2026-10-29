@@ -11,6 +11,7 @@ namespace LiveSplit.T6ZM
     internal sealed class Settings : UserControl
     {
         const int LastRound = 255;
+        const int PageSize = 100;
         static readonly int[] SrcMilestones = { 5, 15, 30, 50, 70, 100 };
         static readonly string[] ModeNames = { "Round end", "Text fade", "Round start" };
 
@@ -19,7 +20,10 @@ namespace LiveSplit.T6ZM
         readonly CheckBox unlimited = new CheckBox { Text = "Unlimited", AutoSize = true };
         readonly ComboBox lastMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140 };
         readonly ComboBox splitMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140 };
-        readonly CheckedListBox splitRounds = new CheckedListBox { CheckOnClick = true, MultiColumn = true, ColumnWidth = 38, Width = 430, IntegralHeight = false, ScrollAlwaysVisible = true };
+        readonly CheckedListBox splitRounds = new CheckedListBox { CheckOnClick = true, MultiColumn = true, ColumnWidth = 38, Width = 386, IntegralHeight = false, Margin = Padding.Empty };
+        readonly Button previousPage = new Button { Text = "<", Width = 24, Margin = Padding.Empty };
+        readonly Button nextPage = new Button { Text = ">", Width = 24, Margin = Padding.Empty };
+        int page;
         readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
         readonly CheckBox autoReset = new CheckBox { Text = "Reset when a map starts (map_restart, fast_restart, map load)", Checked = true, AutoSize = true };
         readonly Label blocked = new Label { Text = "Blocked: timer running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
@@ -58,8 +62,11 @@ namespace LiveSplit.T6ZM
                 Preset("Every 10", () => SetRounds(Every(10))),
                 Preset("Every round", () => SetRounds(Every(1))),
                 Preset("None", () => SetRounds(new int[0]))));
-            splitRounds.Height = splitRounds.ItemHeight * 10 + SystemInformation.HorizontalScrollBarHeight + (splitRounds.Height - splitRounds.ClientSize.Height);
-            Wide(splitRounds);
+            splitRounds.Height = splitRounds.ItemHeight * 10 + (splitRounds.Height - splitRounds.ClientSize.Height);
+            previousPage.Height = nextPage.Height = splitRounds.Height;
+            previousPage.Click += (s, e) => { page--; FillRounds(); };
+            nextPage.Click += (s, e) => { page++; FillRounds(); };
+            Wide(Row(previousPage, splitRounds, nextPage));
 
             var layout = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
             layout.Controls.Add(Row(Caption("Category:"), category, blocked));
@@ -122,13 +129,20 @@ namespace LiveSplit.T6ZM
         void FillRounds()
         {
             int last = unlimited.Checked ? LastRound : Limit - 1;
-            if (splitRounds.Items.Count == last && Enumerable.Range(1, splitRounds.Items.Count - 1).All(i => splitRounds.GetItemChecked(i) == selected.Contains(i + 1)))
+            int pages = Math.Max(1, (last + PageSize - 1) / PageSize);
+            page = Math.Max(0, Math.Min(page, pages - 1));
+            int first = page * PageSize + 1;
+            int count = Math.Max(0, Math.Min(last, first + PageSize - 1) - first + 1);
+            previousPage.Enabled = page > 0;
+            nextPage.Enabled = page < pages - 1;
+            if (splitRounds.Items.Count == count && count > 0 && (int)splitRounds.Items[0] == first
+                && Enumerable.Range(0, count).All(i => first + i == 1 || splitRounds.GetItemChecked(i) == selected.Contains(first + i)))
                 return;
             filling = true;
             splitRounds.BeginUpdate();
             splitRounds.Items.Clear();
-            splitRounds.Items.Add(1, CheckState.Indeterminate);
-            for (int round = 2; round <= last; round++) splitRounds.Items.Add(round, selected.Contains(round));
+            for (int round = first; round < first + count; round++)
+                splitRounds.Items.Add(round, round == 1 ? CheckState.Indeterminate : selected.Contains(round) ? CheckState.Checked : CheckState.Unchecked);
             splitRounds.EndUpdate();
             filling = false;
         }
@@ -136,12 +150,12 @@ namespace LiveSplit.T6ZM
         void OnItemCheck(object sender, ItemCheckEventArgs e)
         {
             if (filling) return;
-            if (e.Index == 0)
+            int round = (int)splitRounds.Items[e.Index];
+            if (round == 1)
             {
                 e.NewValue = CheckState.Indeterminate;
                 return;
             }
-            int round = (int)splitRounds.Items[e.Index];
             if (e.NewValue == CheckState.Checked) selected.Add(round);
             else selected.Remove(round);
             RoundsVersion++;
