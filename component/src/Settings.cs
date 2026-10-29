@@ -25,16 +25,15 @@ namespace LiveSplit.T6ZM
         readonly Button nextPage = new Button { Text = ">", Width = 24, Margin = Padding.Empty };
         int page;
         readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
-        readonly CheckBox autoReset = new CheckBox { Text = "Reset when a map starts (map_restart, fast_restart, map load)", Checked = true, AutoSize = true };
         readonly Label blocked = new Label { Text = "Blocked: timer running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
         readonly Label description = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(436, 0), ForeColor = System.Drawing.SystemColors.GrayText, Margin = new Padding(3, 0, 3, 6) };
 
         static readonly string[] Descriptions =
         {
-            "Starts when the black screen ends. Splits when each chosen round is reached; the split timings below decide the exact moment.",
-            "Starts when the black screen ends. Splits once, when any player takes a Pack-a-Punched weapon from the machine.",
+            "Starts on player control. Splits when each chosen round is reached; the split timings below decide the exact moment.",
+            "Starts on player control. Splits once, when any player takes a Pack-a-Punched weapon from the machine.",
             "Starts on player control. Splits when each ticked buildable is built, in any order, so the splits file can be ordered as you like. The run ends when everything on the map's list is built, and that last one always splits.",
-            "Starts when the black screen ends. Splits on the first box use.",
+            "Starts on player control. Splits on the first box use.",
         };
         readonly ComboBox buildMap = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
         readonly CheckedListBox buildChecks = new CheckedListBox { CheckOnClick = true, IntegralHeight = false, Width = 386, Margin = Padding.Empty };
@@ -88,11 +87,10 @@ namespace LiveSplit.T6ZM
             layout.Controls.Add(buildPanel);
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
             layout.Controls.Add(showInfo);
-            layout.Controls.Add(autoReset);
             Controls.Add(layout);
             AutoSize = true;
 
-            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, autoReset, buildMap })
+            foreach (Control control in new Control[] { category, maxRound, unlimited, lastMode, splitMode, showInfo, buildMap })
                 Hook(control);
             buildMap.SelectedIndexChanged += (s, e) => FillBuildables();
             buildChecks.ItemCheck += OnBuildCheck;
@@ -120,7 +118,6 @@ namespace LiveSplit.T6ZM
         }
 
         public bool ShowInfo => showInfo.Checked;
-        public bool AutoReset => autoReset.Checked;
         public Category Category => (Category)Math.Max(0, category.SelectedIndex);
 
         int Limit => unlimited.Checked ? LastRound : (int)maxRound.Value;
@@ -278,7 +275,6 @@ namespace LiveSplit.T6ZM
                 node.AppendChild(Element(document, "Built_" + map.Script, string.Join(",", map.Items.Where((item, i) => (mask & (1u << i)) != 0).Select(item => item.Key))));
             }
             node.AppendChild(Element(document, "ShowInfo", showInfo.Checked.ToString()));
-            node.AppendChild(Element(document, "AutoReset", autoReset.Checked.ToString()));
             return node;
         }
 
@@ -309,7 +305,6 @@ namespace LiveSplit.T6ZM
                     buildChosen[map.Script] = mask;
                 }
                 showInfo.Checked = ReadBool(node, "ShowInfo", true);
-                autoReset.Checked = ReadBool(node, "AutoReset", true);
             }
             finally
             {

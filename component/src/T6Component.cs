@@ -23,6 +23,7 @@ namespace LiveSplit.T6ZM
         readonly InfoTextComponent nextRow = new InfoTextComponent("Next", "");
 
         RunLogic logic;
+        bool timingMethodSet;
         int logicVersion = -1;
         int roundsVersion = -1;
         uint? startClock;
@@ -62,6 +63,12 @@ namespace LiveSplit.T6ZM
 
         public void Update(IInvalidator invalidator, LiveSplitState state, float width, float height, LayoutMode mode)
         {
+            if (!timingMethodSet && state.CurrentPhase == TimerPhase.NotRunning)
+            {
+                timingMethodSet = true;
+                state.CurrentTimingMethod = TimingMethod.GameTime;
+            }
+
             settings.Locked = state.CurrentPhase != TimerPhase.NotRunning;
             if (state.CurrentPhase == TimerPhase.NotRunning && settings.Version != logicVersion)
             {
@@ -83,7 +90,7 @@ namespace LiveSplit.T6ZM
             {
                 if (e.Kind == GameEventKind.NewLevel)
                 {
-                    if (settings.AutoReset && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
+                    if (state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
                     pending.Clear();
                     logic.NewLevel();
                     continue;
@@ -155,11 +162,10 @@ namespace LiveSplit.T6ZM
             switch (state.CurrentPhase)
             {
                 case TimerPhase.NotRunning:
-                    if (logic.PendingStart.HasValue) return "start: afterlife unfreeze";
                     ReaderSample latest = watcher.Latest;
                     if (latest.Status >= ReaderStatus.Resolving && !string.IsNullOrEmpty(latest.Map) && !logic.SupportsMap(latest.Map))
                         return $"waiting for start: {latest.Map} not supported";
-                    return "start: black screen ends";
+                    return "start: player control";
                 case TimerPhase.Running: return startClock.HasValue ? logic.Next : "started manually, no game time";
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }
