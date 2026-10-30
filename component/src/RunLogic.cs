@@ -4,18 +4,32 @@ using System.Linq;
 
 namespace LiveSplit.T6ZM
 {
+    internal enum ActionKind
+    {
+        Start,
+        Split,
+        Rebase,
+        Pause,
+        Skip,
+    }
+
     internal readonly struct TimerAction
     {
-        public TimerAction(bool start, uint tick, string label)
+        public TimerAction(bool start, uint tick, string label) : this(start ? ActionKind.Start : ActionKind.Split, tick, label, 0) { }
+
+        public TimerAction(ActionKind kind, uint tick, string label, uint baseTicks)
         {
-            Start = start;
+            Kind = kind;
             Tick = tick;
             Label = label;
+            BaseTicks = baseTicks;
         }
 
-        public bool Start { get; }
+        public ActionKind Kind { get; }
+        public bool Start => Kind == ActionKind.Start;
         public uint Tick { get; }
         public string Label { get; }
+        public uint BaseTicks { get; }
     }
 
     internal abstract class RunLogic
@@ -47,6 +61,12 @@ namespace LiveSplit.T6ZM
 
         protected virtual void OnNewLevel() { }
 
+        public virtual bool Continues => false;
+
+        public virtual bool OnSample(ReaderSample sample) => false;
+
+        public virtual void TimerReset() { }
+
         public virtual bool SupportsMap(string script) => true;
 
         public virtual string StartBlocked => null;
@@ -65,30 +85,6 @@ namespace LiveSplit.T6ZM
         public abstract string Next { get; }
 
         protected static bool Became(GameEvent e, int watch) => e.Watch == watch && e.OldValue == 0 && e.NewValue != 0;
-    }
-
-    internal sealed class TestBoxLogic : RunLogic
-    {
-        bool split;
-
-        public override ReaderProfile Profile => ReaderProfile.TestBox;
-
-        public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
-        {
-            if (!running)
-            {
-                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
-            }
-            else if (!split && Became(e, 1))
-            {
-                split = true;
-                yield return new TimerAction(false, e.Clock, "box hit");
-            }
-        }
-
-        protected override void Reset() => split = false;
-
-        public override string Next => split ? "done" : "first box use";
     }
 
     internal sealed class PackAPunchLogic : RunLogic
@@ -154,11 +150,11 @@ namespace LiveSplit.T6ZM
         public void SetSplitRounds(IEnumerable<int> splitRounds)
         {
             milestones.Clear();
-            milestones.UnionWith(splitRounds.Where(r => r >= 2 && r <= 255 && (highRound || r < finalRound)));
-            if (!highRound) milestones.Add(finalRound);
+            milestones.UnionWith(splitRounds.Where(r => r >= 2 && r <= 255 && (highRound || r <= finalRound)));
+            if (!highRound && milestones.Count == 0) milestones.Add(finalRound);
         }
 
-        RoundMode ModeOf(int round) => !highRound && round == finalRound ? finalMode : splitMode;
+        RoundMode ModeOf(int round) => !highRound && round == milestones.Max ? finalMode : splitMode;
 
         public static uint FadeTicks(int round)
         {
