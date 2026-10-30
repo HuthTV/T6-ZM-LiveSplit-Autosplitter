@@ -71,7 +71,8 @@ constexpr watch_def songs[] = {{watch_kind::flag, "initial_blackscreen_passed"},
                                {watch_kind::field, "snd115count"}, {watch_kind::field, "found_ee_radio_count"},
                                {watch_kind::field, "music_override"}, {watch_kind::flag, "nixie_puzzle_solved"},
                                {watch_kind::field, ""} ,
-                               {watch_kind::field, "mannequin_count"}};
+                               {watch_kind::field, "mannequin_count"}, {watch_kind::field, "round_number"},
+                               {watch_kind::flag, "activate_zone_nml"}};
 constexpr std::uint32_t songs_optional_from = 1;
 constexpr watch_def rounds[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::field, "round_number"}, {watch_kind::field, "round_start_time"}};
 
@@ -112,15 +113,15 @@ constexpr watch_def rainbow[] = {{watch_kind::flag, "initial_blackscreen_passed"
 
 constexpr map_wants song_wants[] = {
     {"zm_transit", 1u << 1},
-    {"zm_nuked", (1u << 1) | (1u << 4) | (1u << 7)},
+    {"zm_nuked", (1u << 1) | (1u << 4) | (1u << 7) | (1u << 8)},
     {"zm_highrise", 1u << 1},
     {"zm_prison", (1u << 1) | (1u << 4) | (1u << 5)},
     {"zm_buried", 1u << 1},
-    {"zm_tomb", (1u << 1) | (1u << 2) | (1u << 3)},
+    {"zm_tomb", (1u << 1) | (1u << 2) | (1u << 3) | (1u << 8) | (1u << 9)},
     {nullptr, 0},
 };
 
-constexpr profile_def profiles[] = {{songs, 8, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
+constexpr profile_def profiles[] = {{songs, 10, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
                                     {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"},
                                     {nullptr, 0, nullptr, false, {}, nullptr, nullptr, 32, nullptr, true} T6R_EXTRA_PROFILES};
 

@@ -8,57 +8,83 @@ namespace LiveSplit.T6ZM
     {
         public const int Event = -1;
 
-        public SongStep(string label, int watch, int level)
+        public SongStep(string label, int watch, int level, bool extra = false)
         {
             Label = label;
             Watch = watch;
             Level = level;
+            Extra = extra;
         }
 
         public string Label { get; }
         public int Watch { get; }
         public int Level { get; }
+        public bool Extra { get; }
     }
 
     internal sealed class SongMap
     {
-        public SongMap(string script, string name, string note, params SongStep[] steps)
+        public SongMap(string key, string script, string name, params SongStep[] steps)
         {
+            Key = key;
             Script = script;
             Name = name;
-            Note = note;
             Steps = steps;
         }
 
+        public string Key { get; }
         public string Script { get; }
         public string Name { get; }
-        public string Note { get; }
+        public string Note => null;
         public IReadOnlyList<SongStep> Steps { get; }
         public uint Every => (uint)((1UL << Steps.Count) - 1);
+
+        public uint Forced => 1u << (Steps.Count - 1);
+
+        public uint Default
+        {
+            get
+            {
+                uint mask = 0;
+                for (int i = 0; i < Steps.Count; i++)
+                    if (!Steps[i].Extra) mask |= 1u << i;
+                return mask | Forced;
+            }
+        }
     }
 
     internal static class SongMaps
     {
-        static SongStep[] Counted(string song, string what, int watch) =>
-            Enumerable.Range(1, 3).Select(n => new SongStep($"{song}: {what} {n}", watch, n)).ToArray();
+        static SongStep[] Counted(string what, int watch) =>
+            Enumerable.Range(1, 3).Select(n => new SongStep($"{what} {n}", watch, n)).ToArray();
 
-        static SongMap Map(string script, string name, params SongStep[][] groups) =>
-            new SongMap(script, name, null, groups.SelectMany(g => g).ToArray());
+        static SongMap Song(string key, string script, string name, params SongStep[][] groups) =>
+            new SongMap(key, script, name, groups.SelectMany(g => g).ToArray());
 
         static SongStep[] Start(string song) => new[] { new SongStep(song, SongStep.Event, 0) };
 
+        static SongStep[] Rounds(int last) =>
+            Enumerable.Range(1, last).Select(k => new SongStep($"End of round {k}", SongsLogic.RoundWatch, k + 1, true)).ToArray();
+
+        static SongStep[] Extra(string label, int watch) => new[] { new SongStep(label, watch, 1, true) };
+
         public static readonly SongMap[] All =
         {
-            Map("zm_transit", "TranZit", Counted("Carrion", "teddy", SongsLogic.MeteorWatch)),
-            Map("zm_nuked", "Nuketown", Counted("Samantha's Lullaby", "teddy", SongsLogic.MeteorWatch), Start("Coming Home"), Start("Re-Damned")),
-            Map("zm_highrise", "Die Rise", Counted("We All Fall Down", "teddy", SongsLogic.MeteorWatch)),
-            Map("zm_prison", "Mob of the Dead", Counted("Rusty Cage", "bottle", SongsLogic.MeteorWatch), Start("Where Are We Going")),
-            Map("zm_buried", "Buried", Counted("Always Running", "teddy", SongsLogic.MeteorWatch)),
-            Map("zm_tomb", "Origins", Counted("Archangel", "green stone", SongsLogic.MeteorWatch), Counted("Aether", "plate", SongsLogic.AetherWatch),
-                Counted("Shepherd of Fire", "radio", SongsLogic.RadioWatch)),
+            Song("transit_carrion", "zm_transit", "(TranZit) Carrion", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("nuked_samantha", "zm_nuked", "(Nuketown) Samantha's Lullaby", Rounds(2), Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("nuked_redamned", "zm_nuked", "(Nuketown) Re-Damned", Rounds(6), Start("Re-Damned")),
+            Song("nuked_cominghome", "zm_nuked", "(Nuketown) Coming Home", Rounds(6), Start("Coming Home")),
+            Song("highrise_fall", "zm_highrise", "(Die Rise) We All Fall Down", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("prison_rustycage", "zm_prison", "(Mob of the Dead) Rusty Cage", Counted("Bottle", SongsLogic.MeteorWatch)),
+            Song("prison_whereare", "zm_prison", "(Mob of the Dead) Where Are We Going", Start("Afterlife revive"), Start("Where Are We Going")),
+            Song("buried_running", "zm_buried", "(Buried) Always Running", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("tomb_shepherd", "zm_tomb", "(Origins) Shepherd of Fire", Rounds(4), Counted("Radio", SongsLogic.RadioWatch)),
+            Song("tomb_archangel", "zm_tomb", "(Origins) Archangel", Rounds(4), Counted("Green stone", SongsLogic.MeteorWatch)),
+            Song("tomb_aether", "zm_tomb", "(Origins) Aether", Extra("No Man's Land", SongsLogic.NmlWatch), Rounds(4),
+                new[] { new SongStep("Aether", SongsLogic.AetherWatch, 3) }),
         };
 
-        public static SongMap For(string script) => All.FirstOrDefault(m => m.Script == script);
+        public static SongMap ByKey(string key) => All.FirstOrDefault(m => m.Key == key);
     }
 
     internal sealed class SongsLogic : RunLogic
@@ -69,10 +95,13 @@ namespace LiveSplit.T6ZM
         const int MusicWatch = 4;
         const int NixieWatch = 5;
         const int MannequinWatch = 7;
+        public const int RoundWatch = 8;
+        public const int NmlWatch = 9;
         const int MeteorSongStart = 3;
 
+        readonly SongMap song;
         readonly Func<string, uint> chosen;
-        readonly int[] peak = new int[8];
+        readonly int[] peak = new int[10];
         string map = "";
         uint done;
         string last;
@@ -80,7 +109,11 @@ namespace LiveSplit.T6ZM
         uint? meteorSongClock;
         bool mannequinsDone, comingHome;
 
-        public SongsLogic(Func<string, uint> chosen) => this.chosen = chosen;
+        public SongsLogic(SongMap song, Func<string, uint> chosen)
+        {
+            this.song = song;
+            this.chosen = chosen;
+        }
 
         public override ReaderProfile Profile => ReaderProfile.Songs;
 
@@ -89,7 +122,7 @@ namespace LiveSplit.T6ZM
             if (!string.IsNullOrEmpty(script)) map = script;
         }
 
-        public override bool SupportsMap(string script) => SongMaps.For(script) != null;
+        public override bool SupportsMap(string script) => script == song.Script;
 
         protected override void Reset()
         {
@@ -104,15 +137,15 @@ namespace LiveSplit.T6ZM
 
         public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
         {
-            SongMap current = SongMaps.For(map);
-            if (current == null) yield break;
+            SongMap current = song;
+            if (!SupportsMap(map)) yield break;
             if (!running)
             {
                 if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
                 yield break;
             }
 
-            uint pick = chosen(map);
+            uint pick = chosen(song.Key);
             if (e.Watch == MeteorWatch && e.OldValue < MeteorSongStart && e.NewValue >= MeteorSongStart) meteorSongClock = e.Clock;
 
             if (e.Watch > 0 && e.Watch < peak.Length && e.NewValue > peak[e.Watch])
@@ -159,6 +192,7 @@ namespace LiveSplit.T6ZM
             }
             if (map == "zm_prison")
             {
+                if (e.Watch == CorpseWatch && e.OldValue != 0 && e.NewValue == 0) return "Afterlife revive";
                 if (Became(e, MusicWatch)) musicRise = e.Clock;
                 else if (Became(e, NixieWatch)) nixieRise = e.Clock;
                 else return null;
@@ -175,9 +209,8 @@ namespace LiveSplit.T6ZM
         {
             get
             {
-                SongMap current = SongMaps.For(map);
-                if (current == null) return "map not supported";
-                uint pick = chosen(map) & current.Every;
+                SongMap current = song;
+                uint pick = chosen(song.Key) & current.Every;
                 int total = Enumerable.Range(0, current.Steps.Count).Count(i => (pick & (1u << i)) != 0);
                 int split = Enumerable.Range(0, current.Steps.Count).Count(i => (pick & done & (1u << i)) != 0);
                 return last == null ? $"{total} song steps" : $"{split} of {total} song steps, last: {last}";
