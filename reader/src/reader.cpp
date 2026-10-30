@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <iterator>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -66,8 +67,18 @@ struct watch_def {
     const char* name;
 };
 
-constexpr watch_def test_box[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::flag, "chest_has_been_used"}};
+constexpr watch_def songs[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::field, "meteor_counter"},
+                               {watch_kind::field, "snd115count"}, {watch_kind::field, "found_ee_radio_count"},
+                               {watch_kind::field, "music_override"}, {watch_kind::flag, "nixie_puzzle_solved"},
+                               {watch_kind::field, ""} ,
+                               {watch_kind::field, "mannequin_count"}};
+constexpr std::uint32_t songs_optional_from = 1;
 constexpr watch_def rounds[] = {{watch_kind::flag, "initial_blackscreen_passed"}, {watch_kind::field, "round_number"}, {watch_kind::field, "round_start_time"}};
+
+struct map_wants {
+    const char* map;
+    std::uint32_t mask;
+};
 
 struct profile_def {
     const watch_def* watches;
@@ -77,6 +88,9 @@ struct profile_def {
     const char* player_ints[2] = {};
     const char* player_array = nullptr;
     const char* array_key = nullptr;
+    std::uint32_t optional_from = 32;
+    const map_wants* wants = nullptr;
+    bool ee = false;
 };
 
 constexpr std::uint32_t max_players = 4;
@@ -96,8 +110,19 @@ constexpr std::uint32_t built_value = 1;
 
 constexpr watch_def rainbow[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
 
-constexpr profile_def profiles[] = {{test_box, 2}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
-                                    {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"} T6R_EXTRA_PROFILES};
+constexpr map_wants song_wants[] = {
+    {"zm_transit", 1u << 1},
+    {"zm_nuked", (1u << 1) | (1u << 4) | (1u << 7)},
+    {"zm_highrise", 1u << 1},
+    {"zm_prison", (1u << 1) | (1u << 4) | (1u << 5)},
+    {"zm_buried", 1u << 1},
+    {"zm_tomb", (1u << 1) | (1u << 2) | (1u << 3)},
+    {nullptr, 0},
+};
+
+constexpr profile_def profiles[] = {{songs, 8, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
+                                    {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"},
+                                    {nullptr, 0, nullptr, false, {}, nullptr, nullptr, 32, nullptr, true} T6R_EXTRA_PROFILES};
 
 struct built_map {
     const char* map;
@@ -152,6 +177,7 @@ struct state {
     std::uint32_t flag_array = 0;
     ULONGLONG next_resolve = 0;
     bool complete = false;
+    bool full = false;
     char map[32] = {};
     watch_slot watches[max_watches];
 
@@ -294,6 +320,7 @@ void forget_level() {
     forget_players();
     g.flag_array = 0;
     g.complete = false;
+    g.full = false;
     g.next_resolve = 0;
     g.map[0] = 0;
     g.set_map = nullptr;
@@ -382,10 +409,17 @@ void resolve(std::uint32_t level) {
     g.players_child = players_child, g.players_array = players_array;
     std::memcpy(g.map, map, sizeof(map));
     g.complete = true;
+    std::uint32_t wanted_mask = 0;
+    if (profile.wants)
+        for (const map_wants* wants = profile.wants; wants->map; ++wants)
+            if (std::strcmp(map, wants->map) == 0) wanted_mask = wants->mask;
+    bool wanted_known = true;
     for (std::uint32_t i = 0; i < profile.count; ++i) {
         g.watches[i] = found[i];
-        g.complete = g.complete && found[i].known;
+        if (i < profile.optional_from) g.complete = g.complete && found[i].known;
+        if (wanted_mask & (1u << i)) wanted_known = wanted_known && found[i].known;
     }
+    g.full = g.complete && wanted_known;
 }
 
 bool field_name(std::uint32_t key, char* out, std::size_t capacity) {
@@ -592,7 +626,7 @@ bool name_listed(const char* spec, const char* name) {
     }
 }
 
-void read_set(t6r_sample& out) {
+void read_set(t6r_sample& out, std::uint32_t index) {
     if (!g.set_array) {
         if (GetTickCount64() >= g.next_set) resolve_set();
         if (!g.set_array) return;
@@ -623,8 +657,276 @@ void read_set(t6r_sample& out) {
         current = c.next;
     }
     if (previous != bounds[1]) return;
-    out.values[built_value] = mask;
-    out.watch_known |= 1u << built_value;
+    out.values[index] = mask;
+    out.watch_known |= 1u << index;
+}
+
+enum class ee_kind { flag, field, length, entity, defined, equals, path, player_int, player_has };
+
+struct ee_watch {
+    std::uint32_t index;
+    ee_kind kind;
+    const char* name;
+    const char* key1;
+    const char* key2;
+};
+
+struct ee_map_def {
+    const char* map;
+    const ee_watch* watches;
+    std::uint32_t count;
+    std::uint32_t built_index;
+};
+
+constexpr ee_watch ee_blackscreen = {0, ee_kind::flag, "initial_blackscreen_passed", nullptr, nullptr};
+constexpr ee_watch ee_transit[] = {
+    ee_blackscreen,
+    {1, ee_kind::equals, "scr_zm_ui_gametype", "zclassic", nullptr},
+    {2, ee_kind::flag, "power_on", nullptr, nullptr},
+    {3, ee_kind::field, "power_event_in_progress", nullptr, nullptr},
+    {4, ee_kind::path, "sq_progress", "rich", "A_jetgun_built"},
+    {5, ee_kind::path, "sq_progress", "rich", "A_jetgun_tower"},
+    {7, ee_kind::path, "sq_progress", "rich", "FINISHED"},
+    {8, ee_kind::path, "sq_progress", "maxis", "FINISHED"},
+};
+constexpr ee_watch ee_highrise[] = {
+    ee_blackscreen,
+    {1, ee_kind::flag, "sq_atd_drg_puzzle_complete", nullptr, nullptr},
+    {2, ee_kind::flag, "sq_tower_active", nullptr, nullptr},
+    {3, ee_kind::player_int, "num_perks", nullptr, nullptr},
+    {4, ee_kind::player_has, "perk_purchased", nullptr, nullptr},
+    {5, ee_kind::player_has, "laststand", nullptr, nullptr},
+    {7, ee_kind::player_has, "revivetrigger", nullptr, nullptr},
+};
+constexpr ee_watch ee_prison[] = {
+    ee_blackscreen,
+    {1, ee_kind::flag, "dryer_cycle_active", nullptr, nullptr},
+    {2, ee_kind::flag, "gondola_initialized", nullptr, nullptr},
+    {3, ee_kind::flag, "gondola_in_motion", nullptr, nullptr},
+    {4, ee_kind::flag, "plane_boarded", nullptr, nullptr},
+    {5, ee_kind::flag, "nixie_ee_flashing", nullptr, nullptr},
+    {7, ee_kind::length, "a_important_codes", nullptr, nullptr},
+    {8, ee_kind::entity, "m_headphones", nullptr, nullptr},
+    {9, ee_kind::defined, "winner", nullptr, nullptr},
+};
+constexpr ee_watch ee_buried[] = {
+    ee_blackscreen,
+    {2, ee_kind::flag, "chest_has_been_used", nullptr, nullptr},
+    {3, ee_kind::flag, "spawn_ghosts", nullptr, nullptr},
+    {4, ee_kind::flag, "sq_tpo_special_round_active", nullptr, nullptr},
+    {5, ee_kind::flag, "sq_wisp_saved_with_time_bomb", nullptr, nullptr},
+    {7, ee_kind::field, "buried_sq_maxis_complete", nullptr, nullptr},
+    {8, ee_kind::field, "buried_sq_richtofen_complete", nullptr, nullptr},
+    {9, ee_kind::field, "metagame_sq_maxis_complete", nullptr, nullptr},
+    {10, ee_kind::field, "metagame_sq_richtofen_complete", nullptr, nullptr},
+};
+constexpr ee_watch ee_tomb[] = {
+    ee_blackscreen,
+    {1, ee_kind::flag, "activate_zone_nml", nullptr, nullptr},
+    {2, ee_kind::field, "n_soul_boxes_completed", nullptr, nullptr},
+    {3, ee_kind::field, "n_staffs_crafted", nullptr, nullptr},
+    {4, ee_kind::flag, "ee_all_staffs_placed", nullptr, nullptr},
+    {5, ee_kind::flag, "ee_mech_zombie_hole_opened", nullptr, nullptr},
+    {7, ee_kind::flag, "ee_samantha_released", nullptr, nullptr},
+    {8, ee_kind::field, "intermission", nullptr, nullptr},
+};
+constexpr ee_map_def ee_maps[] = {
+    {"zm_transit", ee_transit, static_cast<std::uint32_t>(std::size(ee_transit)), 0},
+    {"zm_highrise", ee_highrise, static_cast<std::uint32_t>(std::size(ee_highrise)), 0},
+    {"zm_prison", ee_prison, static_cast<std::uint32_t>(std::size(ee_prison)), 0},
+    {"zm_buried", ee_buried, static_cast<std::uint32_t>(std::size(ee_buried)), 11},
+    {"zm_tomb", ee_tomb, static_cast<std::uint32_t>(std::size(ee_tomb)), 0},
+};
+
+struct ee_container {
+    std::uint32_t obj = 0;
+    bool strings = false;
+    std::uint32_t head = 0;
+    bool scanned = false;
+    ULONGLONG rescan_at = 0;
+    std::unordered_map<std::uint32_t, std::uint32_t> known;
+};
+
+struct ee_slot {
+    bool bound = false;
+    std::uint32_t child = 0, key = 0;
+};
+
+struct ee_state {
+    std::uint32_t generation = 0xFFFFFFFF;
+    std::uint32_t flag_array = 0;
+    const ee_map_def* map = nullptr;
+    ee_container level, flags, player;
+    ee_slot slots[max_watches];
+    std::uint32_t player_bounds[2] = {};
+    std::unordered_map<std::uint32_t, std::string> names;
+} ee;
+
+ee_container* ee_owner(const ee_watch& watch) {
+    switch (watch.kind) {
+    case ee_kind::flag: return &ee.flags;
+    case ee_kind::player_int:
+    case ee_kind::player_has: return &ee.player;
+    default: return &ee.level;
+    }
+}
+
+bool ee_child_name(const ee_container& container, std::uint32_t key, std::string& out) {
+    if (container.strings) {
+        char buffer[64];
+        if (key == 0 || key >= child_limit || !text(g.strings + static_cast<address_t>(key) * 24 + 4, buffer, sizeof(buffer))) return false;
+        out = buffer;
+        return true;
+    }
+    auto known = ee.names.find(key);
+    if (known == ee.names.end()) {
+        char buffer[64];
+        if (!field_name(key, buffer, sizeof(buffer))) return false;
+        known = ee.names.emplace(key, buffer).first;
+    }
+    out = known->second;
+    return true;
+}
+
+void ee_bind(ee_container& container, std::uint32_t index, std::uint32_t key) {
+    std::string name;
+    if (!ee_child_name(container, key, name)) return;
+    for (std::uint32_t i = 0; i < ee.map->count; ++i) {
+        const ee_watch& watch = ee.map->watches[i];
+        if (!ee.slots[i].bound && ee_owner(watch) == &container && name == watch.name) ee.slots[i] = {true, index, key};
+    }
+}
+
+void ee_scan(ee_container& container) {
+    if (!container.obj) return;
+    if (!container.scanned && GetTickCount64() < container.rescan_at) return;
+    std::uint32_t bounds[2] = {};
+    if (!read(g.children + container.obj * 8, bounds, sizeof(bounds))) return;
+    if (container.scanned && bounds[0] == container.head) return;
+    const bool full = !container.scanned;
+    if (full) container.known.clear();
+    bool complete = true;
+    std::uint32_t current = bounds[0], steps = 0;
+    while (current != 0) {
+        child c{};
+        if (++steps > chain_limit || !read_child(current, c) || c.owner != container.obj) {
+            complete = false;
+            break;
+        }
+        auto seen = container.known.find(current);
+        if (!full && seen != container.known.end() && seen->second == c.key) break;
+        container.known[current] = c.key;
+        ee_bind(container, current, c.key);
+        current = c.next;
+    }
+    container.scanned = complete;
+    if (complete) container.head = bounds[0];
+    else container.rescan_at = GetTickCount64() + resolve_interval_ms;
+}
+
+bool ee_entry(ee_container& container, ee_slot& slot, child& out) {
+    if (!slot.bound) return false;
+    if (!read_child(slot.child, out) || out.owner != container.obj || out.key != slot.key) {
+        slot.bound = false;
+        container.scanned = false;
+        container.rescan_at = GetTickCount64() + resolve_interval_ms;
+        return false;
+    }
+    return true;
+}
+
+bool ee_array_child(std::uint32_t array, const char* key, child& out) {
+    std::uint32_t type = 0, bounds[2] = {};
+    if (!object_type(array, type) || type != type_array || !read(g.children + array * 8, bounds, sizeof(bounds))) return false;
+    std::uint32_t current = bounds[0], steps = 0;
+    while (current != 0 && ++steps <= 64) {
+        child c{};
+        char name[64];
+        if (!read_child(current, c) || c.owner != array) return false;
+        if (c.key < child_limit && text(g.strings + static_cast<address_t>(c.key) * 24 + 4, name, sizeof(name)) && std::strcmp(name, key) == 0) {
+            out = c;
+            return true;
+        }
+        current = c.next;
+    }
+    return false;
+}
+
+std::int32_t ee_value(const ee_watch& watch, ee_slot& slot) {
+    child c{};
+    if (!ee_entry(*ee_owner(watch), slot, c)) return 0;
+    std::uint32_t type = 0;
+    switch (watch.kind) {
+    case ee_kind::flag:
+    case ee_kind::field:
+    case ee_kind::player_int: return c.tag == tag_int ? static_cast<std::int32_t>(c.payload) : 0;
+    case ee_kind::defined:
+    case ee_kind::player_has: return 1;
+    case ee_kind::length: {
+        std::uint16_t count = 0;
+        if (c.tag != tag_object || !object_type(c.payload, type) || type != type_array || !read(g.objects + static_cast<address_t>(c.payload) * 8 + 2, &count, sizeof(count))) return 0;
+        return count;
+    }
+    case ee_kind::entity:
+        if (c.tag != tag_object || !object_type(c.payload, type)) return 0;
+        return type == type_entity ? 1 : 2;
+    case ee_kind::equals: {
+        char buffer[64];
+        return c.tag == tag_string && c.payload != 0 && c.payload < child_limit && text(g.strings + static_cast<address_t>(c.payload) * 24 + 4, buffer, sizeof(buffer)) && std::strcmp(buffer, watch.key1) == 0 ? 1 : 0;
+    }
+    case ee_kind::path: {
+        child first{}, second{};
+        if (c.tag != tag_object || !ee_array_child(c.payload, watch.key1, first) || first.tag != tag_object || !ee_array_child(first.payload, watch.key2, second) || second.tag != tag_int) return 0;
+        return static_cast<std::int32_t>(second.payload);
+    }
+    }
+    return 0;
+}
+
+void ee_track_player() {
+    std::uint32_t bounds[2] = {};
+    if (!g.players_array || !read(g.children + g.players_array * 8, bounds, sizeof(bounds))) return;
+    if (ee.player.obj && bounds[0] == ee.player_bounds[0] && bounds[1] == ee.player_bounds[1]) return;
+    ee.player_bounds[0] = bounds[0];
+    ee.player_bounds[1] = bounds[1];
+    std::uint32_t entity = 0, current = bounds[0], steps = 0;
+    while (current != 0 && ++steps <= 64) {
+        child c{};
+        if (!read_child(current, c) || c.owner != g.players_array) return;
+        if (c.key == 0x800000 && c.tag == tag_object) entity = c.payload;
+        current = c.next;
+    }
+    if (entity == ee.player.obj) return;
+    ee.player = ee_container{};
+    ee.player.obj = entity;
+    for (std::uint32_t i = 0; i < ee.map->count; ++i)
+        if (ee_owner(ee.map->watches[i]) == &ee.player) ee.slots[i] = ee_slot{};
+}
+
+void read_ee(t6r_sample& out) {
+    if (ee.generation != g.generation || ee.flag_array != g.flag_array) {
+        ee = ee_state{};
+        ee.generation = g.generation;
+        ee.flag_array = g.flag_array;
+        for (const ee_map_def& candidate : ee_maps)
+            if (std::strcmp(g.map, candidate.map) == 0) ee.map = &candidate;
+        ee.level.obj = g.level;
+        ee.flags.obj = g.flag_array;
+        ee.flags.strings = true;
+    }
+    if (!ee.map) return;
+    ee_track_player();
+    ee_scan(ee.level);
+    ee_scan(ee.flags);
+    ee_scan(ee.player);
+    for (std::uint32_t i = 0; i < ee.map->count; ++i) {
+        const ee_watch& watch = ee.map->watches[i];
+        const std::int32_t value = ee_value(watch, ee.slots[i]);
+        out.values[watch.index] = value;
+        out.watch_known |= 1u << watch.index;
+        if (value != 0) out.watch_set |= 1u << watch.index;
+    }
+    if (ee.map->built_index) read_set(out, ee.map->built_index);
 }
 
 void read_watches(t6r_sample& out) {
@@ -682,7 +984,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         out->generation = g.generation;
         if (level == 0 || level >= object_limit) return;
 
-        if (!g.complete && GetTickCount64() >= g.next_resolve) {
+        if (!(g.complete && g.full) && GetTickCount64() >= g.next_resolve) {
             resolve(level);
             if (g.complete && select_player_fields()) {
                 resolve_players();
@@ -691,7 +993,8 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         }
         read_watches(*out);
         if (g.complete && select_player_fields()) track_players(*out);
-        if (g.complete && profiles[g.profile].built_set) read_set(*out);
+        if (g.complete && profiles[g.profile].built_set) read_set(*out, built_value);
+        if (g.complete && profiles[g.profile].ee) read_ee(*out);
         if (!u32(g.build->vm_clock, clock_after)) continue;
         if (timed && (!u32(g.build->engine_time, time_after) || time_after != time)) {
             ++out->retries;

@@ -7,8 +7,8 @@
 #define T6R_API extern "C" __declspec(dllimport)
 #endif
 
-#define T6R_API_VERSION 3
-#define T6R_MAX_WATCHES 8
+#define T6R_API_VERSION 5
+#define T6R_MAX_WATCHES 16
 
 enum t6r_status {
     T6R_NO_PROCESS = 0,
@@ -19,11 +19,12 @@ enum t6r_status {
 };
 
 enum t6r_profile {
-    T6R_PROFILE_TEST_BOX = 0,
+    T6R_PROFILE_SONGS = 0,
     T6R_PROFILE_ROUNDS = 1,
     T6R_PROFILE_PACK_A_PUNCH = 2,
     T6R_PROFILE_BUILDABLES = 3,
     T6R_PROFILE_RAINBOW = 4,
+    T6R_PROFILE_EASTER_EGG = 5,
 };
 
 #pragma pack(push, 4)
