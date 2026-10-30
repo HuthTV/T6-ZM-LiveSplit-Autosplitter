@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -31,6 +32,17 @@ namespace LiveSplit.T6ZM
         uint baseTicks;
         string lastSplit;
 
+        readonly RunStore store = new RunStore();
+        readonly List<SavedSplit> madeSplits = new List<SavedSplit>();
+        SavedRun saved;
+        DateTime attemptStartUtc;
+        string attemptMap = "";
+        uint attemptProcess, attemptLevel, lastClockSeen;
+        long attemptProcessStart;
+        DateTime lastSave = DateTime.MinValue;
+        DateTime? inactiveSince;
+        DateTime closingUntil = DateTime.MinValue;
+
         public T6Component(LiveSplitState state)
         {
             this.state = state;
@@ -38,6 +50,8 @@ namespace LiveSplit.T6ZM
             logic = settings.CreateLogic();
             watcher = new Watcher(logic.Profile);
             state.OnReset += OnReset;
+            saved = store.Load();
+            if (state.Form != null) state.Form.FormClosing += (s, e) => closingUntil = DateTime.UtcNow.AddSeconds(60);
         }
 
         IEnumerable<InfoTextComponent> Rows => settings.ShowInfo ? new[] { statusRow, nextRow } : Array.Empty<InfoTextComponent>();
@@ -63,7 +77,9 @@ namespace LiveSplit.T6ZM
             baseTicks = 0;
             lastSplit = null;
             pending.Clear();
+            madeSplits.Clear();
             logic.TimerReset();
+            if (inactiveSince == null) inactiveSince = DateTime.UtcNow;
         }
 
         public void Update(IInvalidator invalidator, LiveSplitState state, float width, float height, LayoutMode mode)
@@ -94,6 +110,8 @@ namespace LiveSplit.T6ZM
             (logic as SongsLogic)?.SetMap(sample.Map);
             (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : 0);
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
+            if (saved != null && state.CurrentPhase == TimerPhase.NotRunning && !startClock.HasValue) TryResume(sample);
+            Housekeeping();
             if (logic.OnSample(sample) && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
@@ -127,22 +145,31 @@ namespace LiveSplit.T6ZM
                 if (next.Kind == ActionKind.Pause)
                 {
                     timer.Pause();
+                    SaveRun(sample);
                     break;
                 }
                 if (next.Kind == ActionKind.Skip)
                 {
+                    madeSplits.Add(new SavedSplit { Label = "(skipped)" });
                     timer.SkipSplit();
+                    SaveRun(sample);
                     continue;
                 }
                 state.SetGameTime(Ticks(baseTicks + next.Tick - startClock.Value));
+                int index = state.CurrentSplitIndex;
                 timer.Split();
                 lastSplit = next.Label;
+                Time made = index >= 0 && index < state.Run.Count ? state.Run[index].SplitTime : default(Time);
+                madeSplits.Add(new SavedSplit { Label = next.Label, RealTicks = made.RealTime?.Ticks, GameTicks = made.GameTime?.Ticks });
+                SaveRun(sample);
             }
             if (live && Running)
             {
                 state.IsGameTimePaused = true;
                 state.SetGameTime(Ticks(baseTicks + sample.Clock - startClock.Value));
             }
+            if (Active && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel) lastClockSeen = sample.Clock;
+            if (Active && DateTime.UtcNow - lastSave > TimeSpan.FromSeconds(2)) SaveRun(sample);
 
             statusRow.InformationValue = Status(sample);
             nextRow.InformationValue = Next();
@@ -164,6 +191,11 @@ namespace LiveSplit.T6ZM
             startGeneration = generation;
             baseTicks = action.BaseTicks;
             pending.Clear();
+            madeSplits.Clear();
+            attemptStartUtc = DateTime.UtcNow;
+            inactiveSince = null;
+            CaptureAttempt(watcher.Latest);
+            SaveRun(watcher.Latest);
         }
 
         void Rebase(TimerAction action, uint generation)
@@ -175,6 +207,116 @@ namespace LiveSplit.T6ZM
             baseTicks = action.BaseTicks;
             state.SetGameTime(Ticks(baseTicks));
             pending.Clear();
+            CaptureAttempt(watcher.Latest);
+            SaveRun(watcher.Latest);
+        }
+
+        void CaptureAttempt(ReaderSample s)
+        {
+            attemptMap = s.Map ?? "";
+            attemptProcess = s.ProcessId;
+            attemptLevel = s.LevelId;
+            attemptProcessStart = ProcessStartTicks(s.ProcessId);
+            lastClockSeen = s.Clock;
+        }
+
+        static long ProcessStartTicks(uint processId)
+        {
+            if (processId == 0) return 0;
+            try
+            {
+                using (Process process = Process.GetProcessById((int)processId)) return process.StartTime.ToUniversalTime().Ticks;
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        void SaveRun(ReaderSample sample)
+        {
+            if (!Active || attemptProcess == 0) return;
+            lastSave = DateTime.UtcNow;
+            bool paused = state.CurrentPhase == TimerPhase.Paused;
+            store.Save(new SavedRun
+            {
+                Identity = logic.Identity,
+                Map = attemptMap,
+                ProcessId = attemptProcess,
+                ProcessStartTicks = attemptProcessStart,
+                LevelId = attemptLevel,
+                StartClock = startClock.Value,
+                BaseTicks = baseTicks,
+                LastClock = lastClockSeen,
+                AttemptStartedUtc = attemptStartUtc.Ticks,
+                Segments = state.Run.Count,
+                Paused = paused,
+                PausedAtTicks = paused ? state.TimePausedAt.Ticks : 0,
+                Splits = new List<SavedSplit>(madeSplits),
+                LogicState = logic.SaveState(),
+            });
+        }
+
+        void Housekeeping()
+        {
+            if (state.CurrentPhase == TimerPhase.Ended && inactiveSince == null) inactiveSince = DateTime.UtcNow;
+            bool idle = state.CurrentPhase == TimerPhase.NotRunning || state.CurrentPhase == TimerPhase.Ended;
+            if (inactiveSince.HasValue && idle && DateTime.UtcNow - inactiveSince.Value > TimeSpan.FromSeconds(1))
+            {
+                inactiveSince = null;
+                if (DateTime.UtcNow > closingUntil) store.Delete();
+            }
+        }
+
+        void TryResume(ReaderSample sample)
+        {
+            if (sample.Status < ReaderStatus.Ready || sample.ProcessId == 0) return;
+            long processStart = ProcessStartTicks(sample.ProcessId);
+            if (!saved.Matches(sample, processStart, logic.Identity, state.Run.Count))
+            {
+                store.Delete();
+                saved = null;
+                return;
+            }
+            SavedRun run = saved;
+            saved = null;
+            var started = new DateTime(run.AttemptStartedUtc, DateTimeKind.Utc);
+            TimeSpan elapsed = run.Paused ? TimeSpan.FromTicks(run.PausedAtTicks) : DateTime.UtcNow - started;
+            timer.Start();
+            timer.InitializeGameTime();
+            state.IsGameTimePaused = true;
+            state.StartTime -= elapsed;
+            state.AdjustedStartTime -= elapsed;
+            state.StartTimeWithOffset -= elapsed;
+            state.AttemptStarted = new AtomicDateTime(started, false);
+
+            int index = 0;
+            foreach (SavedSplit split in run.Splits)
+            {
+                if (index >= state.Run.Count - 1) break;
+                state.Run[index++].SplitTime = new Time(split.RealTicks.HasValue ? TimeSpan.FromTicks(split.RealTicks.Value) : (TimeSpan?)null,
+                                                       split.GameTicks.HasValue ? TimeSpan.FromTicks(split.GameTicks.Value) : (TimeSpan?)null);
+            }
+            madeSplits.Clear();
+            madeSplits.AddRange(run.Splits.Take(index));
+            int skip = logic.Resume(run.LogicState, run.Splits.Select(s => s.Label).ToList(), sample);
+            for (int i = 0; i < skip && index < state.Run.Count - 1; i++)
+            {
+                state.Run[index++].SplitTime = default(Time);
+                madeSplits.Add(new SavedSplit { Label = "(skipped)" });
+            }
+            state.CurrentSplitIndex = index;
+
+            startClock = run.StartClock;
+            startGeneration = sample.Generation;
+            baseTicks = run.BaseTicks;
+            attemptStartUtc = started;
+            CaptureAttempt(sample);
+            inactiveSince = null;
+            pending.Clear();
+            state.SetGameTime(Ticks(baseTicks + sample.Clock - startClock.Value));
+            if (run.Paused) timer.Pause();
+            SaveRun(sample);
         }
 
         static TimeSpan Ticks(uint ticks) => TimeSpan.FromTicks(Tick.Ticks * ticks);

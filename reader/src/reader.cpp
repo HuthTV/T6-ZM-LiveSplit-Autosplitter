@@ -983,6 +983,8 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         out->clock = clock;
         const bool timed = g.build->engine_time && u32(g.build->engine_time, time);
         out->generation = g.generation;
+        out->process_id = GetProcessId(g.process);
+        out->level_id = level;
         if (level == 0 || level >= object_limit) return;
 
         if (!(g.complete && g.full) && GetTickCount64() >= g.next_resolve) {

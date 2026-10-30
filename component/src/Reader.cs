@@ -19,6 +19,8 @@ namespace LiveSplit.T6ZM
         public uint Retries;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public int[] Values;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Map;
+        public uint ProcessId;
+        public uint LevelId;
 
         public bool Known(int watch) => (WatchKnown & (1u << watch)) != 0;
     }
@@ -26,7 +28,7 @@ namespace LiveSplit.T6ZM
     internal static class Reader
     {
         const string Dll = "t6zm_reader.dll";
-        const int ApiVersion = 5;
+        const int ApiVersion = 6;
 
         static Reader()
         {

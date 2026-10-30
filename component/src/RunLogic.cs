@@ -67,6 +67,10 @@ namespace LiveSplit.T6ZM
 
         public virtual void TimerReset() { }
 
+        public virtual string Identity => GetType().Name;
+        public virtual string SaveState() => "";
+        public virtual int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample) => 0;
+
         public virtual bool SupportsMap(string script) => true;
 
         public virtual string StartBlocked => null;
@@ -201,6 +205,22 @@ namespace LiveSplit.T6ZM
             reached.Clear();
             roundStarts.Clear();
             released = 0;
+        }
+
+        public override int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample)
+        {
+            int last = 0;
+            foreach (string label in splits)
+                if (label != null && label.StartsWith("round ") && int.TryParse(label.Substring(6), out int round)) last = Math.Max(last, round);
+            released = last;
+            int current = sample.Known(RoundWatch) ? sample.Values[RoundWatch] : 0;
+            int skipped = 0;
+            foreach (int milestone in milestones.Where(r => r > released && r <= current))
+            {
+                skipped++;
+                released = milestone;
+            }
+            return skipped;
         }
 
         public IEnumerable<TimerAction> Release()

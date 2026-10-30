@@ -396,6 +396,35 @@ namespace LiveSplit.T6ZM
 
         public override bool Continues => super;
 
+        public override string Identity => super ? "EasterEggLogic:super" : "EasterEggLogic";
+
+        public override string SaveState() =>
+            string.Join(";", 1, completed, carry, attempt ? 1 : 0, attemptStart, baseTicks, lastGame, map, string.Join(",", done));
+
+        public override int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample)
+        {
+            map = string.IsNullOrEmpty(sample.Map) ? map : sample.Map;
+            classic = map != TransitScript || (sample.Known(1) && sample.Values[1] != 0);
+            string[] parts = (saved ?? "").Split(';');
+            done.Clear();
+            if (parts.Length >= 9 && parts[0] == "1"
+                && int.TryParse(parts[1], out int completedMaps) && uint.TryParse(parts[2], out uint carried) && uint.TryParse(parts[4], out uint start)
+                && uint.TryParse(parts[5], out uint baseT) && uint.TryParse(parts[6], out uint last))
+            {
+                completed = completedMaps;
+                carry = carried;
+                attempt = super && parts[3] == "1";
+                attemptStart = start;
+                baseTicks = baseT;
+                lastGame = last;
+                foreach (string step in parts[8].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) done.Add(step);
+            }
+            attemptGeneration = sample.Generation;
+            resetGeneration = sample.Generation;
+            if (!super || attempt) detector = EeDetector.Create(map);
+            return 0;
+        }
+
         public override bool SupportsMap(string script) => EeMaps.For(script, super) != null;
 
         public override string StartBlocked
