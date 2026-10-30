@@ -60,19 +60,13 @@ namespace LiveSplit.T6ZM
                 new Buildable("turbine", "Turbine"), new Buildable("headchopper_zm", "Head Chopper"), new Buildable("subwoofer_zm", "Subsurface Resonator"),
                 new Buildable("sq_common", "NAV Table"), new Buildable("springpad_zm", "Trample Steam"),
                 new Buildable("buried_sq_bt_m_tower|buried_sq_bt_r_tower", "Guillotine / Gallows", optional: true),
-                new Buildable("buried_sq_oillamp", "Oil Lamp", optional: true), new Buildable("buried_sq_tpo_switch", "Switch", optional: true))
-            {
-                Note = "Guillotine / Gallows, Oil Lamp and Switch are sidequest items: they split only when chosen and are not needed to finish.",
-            },
+                new Buildable("buried_sq_oillamp", "Oil Lamp", optional: true), new Buildable("buried_sq_tpo_switch", "Switch", optional: true)),
             new BuildableMap("zm_prison", "Mob of the Dead",
                 new Buildable("alcatraz_shield_zm", "Zombie Shield"), new Buildable("plane", "Plane"), new Buildable("packasplat", "Acid Gat Kit")),
             new BuildableMap("zm_tomb", "Origins",
                 new Buildable("equip_dieseldrone_zm", "Maxis Drone"), new Buildable("tomb_shield_zm", "Zombie Shield"),
                 new Buildable("elemental_staff_fire", "Fire Staff"), new Buildable("elemental_staff_air", "Wind Staff"),
-                new Buildable("elemental_staff_lightning", "Lightning Staff"), new Buildable("elemental_staff_water", "Ice Staff"))
-            {
-                Note = "A staff counts when it is crafted. Upgrading it is not needed.",
-            },
+                new Buildable("elemental_staff_lightning", "Lightning Staff"), new Buildable("elemental_staff_water", "Ice Staff")),
         };
 
         public static BuildableMap For(string script) => All.FirstOrDefault(m => m.Script == script);
