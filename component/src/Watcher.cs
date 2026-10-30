@@ -30,7 +30,7 @@ namespace LiveSplit.T6ZM
 
     internal sealed class Watcher : IDisposable
     {
-        const int MaxWatches = 8;
+        const int MaxWatches = 16;
 
         readonly Thread thread;
         readonly object gate = new object();

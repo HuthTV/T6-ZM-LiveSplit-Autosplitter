@@ -28,6 +28,7 @@ namespace LiveSplit.T6ZM
         int roundsVersion = -1;
         uint? startClock;
         uint startGeneration;
+        uint baseTicks;
         string lastSplit;
 
         public T6Component(LiveSplitState state)
@@ -54,11 +55,15 @@ namespace LiveSplit.T6ZM
 
         bool Running => startClock.HasValue && state.CurrentPhase == TimerPhase.Running;
 
+        bool Active => startClock.HasValue && (state.CurrentPhase == TimerPhase.Running || state.CurrentPhase == TimerPhase.Paused);
+
         void OnReset(object sender, TimerPhase phase)
         {
             startClock = null;
+            baseTicks = 0;
             lastSplit = null;
             pending.Clear();
+            logic.TimerReset();
         }
 
         public void Update(IInvalidator invalidator, LiveSplitState state, float width, float height, LayoutMode mode)
@@ -86,22 +91,28 @@ namespace LiveSplit.T6ZM
 
             ReaderSample sample = watcher.Latest;
             (logic as BuildablesLogic)?.SetMap(sample.Map);
+            (logic as SongsLogic)?.SetMap(sample.Map);
             (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : 0);
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
+            if (logic.OnSample(sample) && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
                 if (e.Kind == GameEventKind.NewLevel)
                 {
-                    if (state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
+                    if (!logic.Continues && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
                     pending.Clear();
                     logic.NewLevel();
                     continue;
                 }
-                if (Running && e.Generation != startGeneration) continue;
-                foreach (TimerAction action in logic.OnChange(e, Running))
+                if (Active && e.Generation != startGeneration && !logic.Continues) continue;
+                foreach (TimerAction action in logic.OnChange(e, Active))
                 {
-                    if (action.Start) Start(action, e.Generation);
-                    else pending.Enqueue(action);
+                    switch (action.Kind)
+                    {
+                        case ActionKind.Start: Start(action, e.Generation); break;
+                        case ActionKind.Rebase: Rebase(action, e.Generation); break;
+                        default: pending.Enqueue(action); break;
+                    }
                 }
             }
 
@@ -112,15 +123,25 @@ namespace LiveSplit.T6ZM
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
             while (live && Running && pending.Count > 0 && pending.Peek().Tick <= sample.Clock)
             {
-                TimerAction split = pending.Dequeue();
-                state.SetGameTime(Ticks(split.Tick - startClock.Value));
+                TimerAction next = pending.Dequeue();
+                if (next.Kind == ActionKind.Pause)
+                {
+                    timer.Pause();
+                    break;
+                }
+                if (next.Kind == ActionKind.Skip)
+                {
+                    timer.SkipSplit();
+                    continue;
+                }
+                state.SetGameTime(Ticks(baseTicks + next.Tick - startClock.Value));
                 timer.Split();
-                lastSplit = split.Label;
+                lastSplit = next.Label;
             }
             if (live && Running)
             {
                 state.IsGameTimePaused = true;
-                state.SetGameTime(Ticks(sample.Clock - startClock.Value));
+                state.SetGameTime(Ticks(baseTicks + sample.Clock - startClock.Value));
             }
 
             statusRow.InformationValue = Status(sample);
@@ -130,13 +151,29 @@ namespace LiveSplit.T6ZM
 
         void Start(TimerAction action, uint generation)
         {
-            if (state.CurrentPhase != TimerPhase.NotRunning) return;
+            if (state.CurrentPhase != TimerPhase.NotRunning)
+            {
+                if (!logic.Continues) return;
+                timer.Reset();
+            }
             timer.Start();
             timer.InitializeGameTime();
             state.IsGameTimePaused = true;
-            state.SetGameTime(TimeSpan.Zero);
+            state.SetGameTime(Ticks(action.BaseTicks));
             startClock = action.Tick;
             startGeneration = generation;
+            baseTicks = action.BaseTicks;
+            pending.Clear();
+        }
+
+        void Rebase(TimerAction action, uint generation)
+        {
+            if (!Active) return;
+            if (state.CurrentPhase == TimerPhase.Paused) timer.Pause();
+            startClock = action.Tick;
+            startGeneration = generation;
+            baseTicks = action.BaseTicks;
+            state.SetGameTime(Ticks(baseTicks));
             pending.Clear();
         }
 
@@ -170,7 +207,8 @@ namespace LiveSplit.T6ZM
                     if (latest.Status >= ReaderStatus.Resolving && logic.StartBlocked is string blocked)
                         return $"waiting for start: {blocked}";
                     return "start: player control";
-                case TimerPhase.Running: return startClock.HasValue ? logic.Next : "started manually, no game time";
+                case TimerPhase.Running:
+                case TimerPhase.Paused: return startClock.HasValue ? logic.Next : "started manually, no game time";
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }
         }

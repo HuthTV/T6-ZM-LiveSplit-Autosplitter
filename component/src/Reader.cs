@@ -6,7 +6,7 @@ namespace LiveSplit.T6ZM
 {
     internal enum ReaderStatus : uint { NoProcess = 0, Unsupported = 1, NoLevel = 2, Resolving = 3, Ready = 4 }
 
-    internal enum ReaderProfile : uint { TestBox = 0, Rounds = 1, PackAPunch = 2, Buildables = 3, Rainbow = 4 }
+    internal enum ReaderProfile : uint { Songs = 0, Rounds = 1, PackAPunch = 2, Buildables = 3, Rainbow = 4, EasterEgg = 5 }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4, CharSet = CharSet.Ansi)]
     internal struct ReaderSample
@@ -17,7 +17,7 @@ namespace LiveSplit.T6ZM
         public uint WatchKnown;
         public uint WatchSet;
         public uint Retries;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)] public int[] Values;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public int[] Values;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Map;
 
         public bool Known(int watch) => (WatchKnown & (1u << watch)) != 0;
@@ -26,7 +26,7 @@ namespace LiveSplit.T6ZM
     internal static class Reader
     {
         const string Dll = "t6zm_reader.dll";
-        const int ApiVersion = 3;
+        const int ApiVersion = 5;
 
         static Reader()
         {
