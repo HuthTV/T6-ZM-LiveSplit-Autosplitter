@@ -67,7 +67,7 @@ namespace LiveSplit.T6ZM
 
         static readonly EeStep Symbols = new EeStep("highrise_symbols", "Symbols", "flag sq_atd_drg_puzzle_complete");
         static readonly EeStep Perks = new EeStep("highrise_perks", "High Maintenance",
-            "first +1 of players[0].num_perks after flag sq_tower_active that is not a purchase, a revive return or a repeat");
+            "the first reward orb is deleted (Plutonium); without an orb seen, the first +1 of players[0].num_perks after flag sq_tower_active that is not a purchase, a revive return or a repeat");
         static readonly EeStep Plane1 = new EeStep("plane_1", "Flight 1", "flag plane_boarded, 1st rise");
         static readonly EeStep Plane2 = new EeStep("plane_2", "Flight 2", "flag plane_boarded, 2nd rise");
         static readonly EeStep Plane3 = new EeStep("plane_3", "Flight 3", "flag plane_boarded, 3rd rise");
@@ -217,7 +217,7 @@ namespace LiveSplit.T6ZM
         const uint RecentTicks = 2;
         const uint RepeatTicks = 5;
 
-        bool towerActive, marker, laststand, revive;
+        bool towerActive, marker, laststand, revive, orbSeen;
         uint? markerSetAt, markerClearedAt, standingClearedAt, lastRise;
 
         public override IEnumerable<EeHit> OnChange(GameEvent e)
@@ -249,8 +249,12 @@ namespace LiveSplit.T6ZM
                     bool returned = laststand || revive || (standingClearedAt.HasValue && e.Clock - standingClearedAt.Value <= RecentTicks);
                     bool repeat = lastRise.HasValue && e.Clock - lastRise.Value <= RepeatTicks;
                     lastRise = e.Clock;
-                    if (towerActive && e.NewValue - e.OldValue == 1 && !purchase && !returned && !repeat)
+                    if (towerActive && !orbSeen && e.NewValue - e.OldValue == 1 && !purchase && !returned && !repeat)
                         yield return new EeHit("highrise_perks", e.Clock);
+                    break;
+                case 8:
+                    if (e.NewValue >= 2) orbSeen = true;
+                    if (e.NewValue == 3) yield return new EeHit("highrise_perks", e.Clock);
                     break;
             }
         }
@@ -286,7 +290,7 @@ namespace LiveSplit.T6ZM
                     if (Rose(e) && codesStage && ++finals == 4) yield return new EeHit("codes", e.Clock);
                     break;
                 case 8:
-                    if (e.OldValue == 1 && e.NewValue != 1) yield return new EeHit("headphones", e.Clock);
+                    if (e.NewValue == 2) yield return new EeHit("headphones", e.Clock);
                     break;
                 case 9:
                     if (Rose(e)) yield return new EeHit("fight", e.Clock + ShowdownTicks);
@@ -379,6 +383,7 @@ namespace LiveSplit.T6ZM
         bool classic = true;
         EeDetector detector;
         uint resetGeneration = uint.MaxValue;
+        uint classicGeneration = uint.MaxValue;
         int completed;
         uint carry;
         bool attempt;
@@ -396,34 +401,7 @@ namespace LiveSplit.T6ZM
 
         public override bool Continues => super;
 
-        public override string Identity => super ? "EasterEggLogic:super" : "EasterEggLogic";
-
-        public override string SaveState() =>
-            string.Join(";", 1, completed, carry, attempt ? 1 : 0, attemptStart, baseTicks, lastGame, map, string.Join(",", done));
-
-        public override int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample)
-        {
-            map = string.IsNullOrEmpty(sample.Map) ? map : sample.Map;
-            classic = map != TransitScript || (sample.Known(1) && sample.Values[1] != 0);
-            string[] parts = (saved ?? "").Split(';');
-            done.Clear();
-            if (parts.Length >= 9 && parts[0] == "1"
-                && int.TryParse(parts[1], out int completedMaps) && uint.TryParse(parts[2], out uint carried) && uint.TryParse(parts[4], out uint start)
-                && uint.TryParse(parts[5], out uint baseT) && uint.TryParse(parts[6], out uint last))
-            {
-                completed = completedMaps;
-                carry = carried;
-                attempt = super && parts[3] == "1";
-                attemptStart = start;
-                baseTicks = baseT;
-                lastGame = last;
-                foreach (string step in parts[8].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) done.Add(step);
-            }
-            attemptGeneration = sample.Generation;
-            resetGeneration = sample.Generation;
-            if (!super || attempt) detector = EeDetector.Create(map);
-            return 0;
-        }
+        public override uint? FrozenGameTicks => super && !attempt && completed > 0 ? carry : (uint?)null;
 
         public override bool SupportsMap(string script) => EeMaps.For(script, super) != null;
 
@@ -441,7 +419,13 @@ namespace LiveSplit.T6ZM
         {
             if (s.Status < ReaderStatus.Resolving) return false;
             if (!string.IsNullOrEmpty(s.Map)) map = s.Map;
-            classic = map != TransitScript || (s.Known(1) && s.Values[1] != 0);
+            if (map != TransitScript) classic = true;
+            else if (s.Known(1))
+            {
+                classic = s.Values[1] != 0;
+                classicGeneration = s.Generation;
+            }
+            else if (s.Generation != classicGeneration) classic = false;
             if (!super) return false;
             if (attempt && s.Generation == attemptGeneration) lastGame = baseTicks + (s.Clock - attemptStart);
             if (map == TransitScript && classic && s.Generation != resetGeneration)
@@ -482,6 +466,7 @@ namespace LiveSplit.T6ZM
         protected override void Reset()
         {
             done.Clear();
+            if (!super) detector = EeDetector.Create(map);
         }
 
         static int SuperIndex(string script)
@@ -505,11 +490,7 @@ namespace LiveSplit.T6ZM
             {
                 if (!running)
                 {
-                    if (BlackscreenEnded(e) && SupportsMap(map) && classic)
-                    {
-                        detector = EeDetector.Create(map);
-                        yield return StartRun(e.Clock);
-                    }
+                    if (BlackscreenEnded(e) && SupportsMap(map) && classic) yield return StartRun(e.Clock);
                     yield break;
                 }
                 foreach (TimerAction action in Handle(e)) yield return action;

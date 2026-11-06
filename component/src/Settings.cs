@@ -54,7 +54,7 @@ namespace LiveSplit.T6ZM
         readonly Button nextPage = new Button { Text = ">", Width = 24, Margin = Padding.Empty };
         int page;
         readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
-        readonly Label blocked = new Label { Text = "Blocked: timer running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
+        readonly Label blocked = new Label { Text = "Some settings locked while timer is running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
         readonly Label description = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(424, 0), ForeColor = System.Drawing.SystemColors.ControlText, Font = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9f), Margin = Padding.Empty };
         readonly Panel descriptionBox = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = System.Drawing.SystemColors.ControlLight, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(6), Margin = new Padding(3, 2, 3, 8), MinimumSize = new System.Drawing.Size(436, 0) };
 
@@ -93,7 +93,7 @@ namespace LiveSplit.T6ZM
         readonly Dictionary<string, uint> eeChosen = new Dictionary<string, uint>();
         readonly TableLayoutPanel roundsPanel = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
 
-        readonly HashSet<int> selected = new HashSet<int>(Every(1));
+        readonly HashSet<int> selected = new HashSet<int>();
         bool loading, filling, locked, onMapPage;
 
         public Settings()
@@ -178,6 +178,10 @@ namespace LiveSplit.T6ZM
             FillSongs();
             FillEe();
             splitRounds.ItemCheck += OnItemCheck;
+            maxRound.ValueChanged += (s, e) => { if (!loading) RoundsVersion++; };
+            unlimited.CheckedChanged += (s, e) => { if (!loading) RoundsVersion++; };
+            splitMode.SelectedIndexChanged += (s, e) => { if (!loading) RoundsVersion++; };
+            lastMode.SelectedIndexChanged += (s, e) => { if (!loading) RoundsVersion++; };
             FillRounds();
             Changed();
         }
@@ -187,6 +191,11 @@ namespace LiveSplit.T6ZM
         public int RoundsVersion { get; private set; }
 
         public IEnumerable<int> SplitRounds => selected.ToArray();
+
+        public int MaxRound => (int)maxRound.Value;
+        public bool Unlimited => unlimited.Checked;
+        public RoundMode SplitTiming => (RoundMode)(splitMode.SelectedIndex + 1);
+        public RoundMode LastTiming => (RoundMode)(lastMode.SelectedIndex + 1);
 
         public bool Locked
         {
@@ -412,7 +421,7 @@ namespace LiveSplit.T6ZM
 
         void FillRounds()
         {
-            int last = unlimited.Checked ? LastRound : Limit - 1;
+            int last = Limit;
             int pages = Math.Max(1, (last + PageSize - 1) / PageSize);
             page = Math.Max(0, Math.Min(page, pages - 1));
             int first = page * PageSize + 1;
@@ -476,7 +485,7 @@ namespace LiveSplit.T6ZM
             index = Array.FindIndex(RainbowMaps.All, m => m.Script == GameMap);
             if (index >= 0 && rainbowMap.SelectedIndex != index) rainbowMap.SelectedIndex = index;
             index = Array.FindIndex(SongMaps.All, m => m.Script == GameMap);
-            if (index >= 0 && SelectedSongMap.Script != GameMap) songMap.SelectedIndex = index;
+            if (index >= 0 && !locked && SelectedSongMap.Script != GameMap) songMap.SelectedIndex = index;
             index = Array.FindIndex(EeMaps.All, m => m.Script == GameMap);
             if (index >= 0 && eeMap.SelectedIndex != index) eeMap.SelectedIndex = index;
         }
@@ -489,9 +498,12 @@ namespace LiveSplit.T6ZM
 
         void UpdateEnabled()
         {
-            category.Enabled = unlimited.Enabled = splitMode.Enabled = !locked;
+            category.Enabled = songMap.Enabled = eePlayers.Enabled = !locked;
             blocked.Visible = locked;
-            maxRound.Enabled = lastMode.Enabled = !locked && !unlimited.Checked;
+            unlimited.Enabled = true;
+            maxRound.Enabled = !unlimited.Checked;
+            lastMode.Enabled = !unlimited.Checked;
+            splitMode.Enabled = true;
         }
 
         void Hook(Control control)
@@ -546,6 +558,7 @@ namespace LiveSplit.T6ZM
                 uint mask = RainbowMask(map.Script);
                 node.AppendChild(Element(document, "Rainbow_" + map.Script, string.Join(",", map.Steps.Where((step, i) => (mask & (1u << i)) != 0).Select(step => step.Label))));
             }
+            node.AppendChild(Element(document, "Song", SelectedSongMap.Key));
             foreach (SongMap map in SongMaps.All)
             {
                 uint mask = SongMask(map.Key);
@@ -602,6 +615,8 @@ namespace LiveSplit.T6ZM
                         if (chosen.Contains(map.Steps[i].Label)) mask |= 1u << i;
                     rainbowChosen[map.Script] = mask;
                 }
+                int song = Array.FindIndex(SongMaps.All, m => m.Key == node?["Song"]?.InnerText);
+                if (song >= 0) songMap.SelectedIndex = song;
                 foreach (SongMap map in SongMaps.All)
                 {
                     string labels = node?["Songs_" + map.Key]?.InnerText;

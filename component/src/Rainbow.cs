@@ -66,10 +66,10 @@ namespace LiveSplit.T6ZM
 
         public override ReaderProfile Profile => ReaderProfile.Rainbow;
 
-        public void SetLevel(string script, int playerCount)
+        public void SetLevel(string script, int? playerCount)
         {
             if (!string.IsNullOrEmpty(script)) map = script;
-            players = playerCount;
+            if (playerCount is int count) players = count;
         }
 
         public override bool SupportsMap(string script) => RainbowMaps.For(script) != null;

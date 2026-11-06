@@ -10,10 +10,12 @@
 
 #include <cstddef>
 #include <iterator>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -29,11 +31,13 @@ struct build_def {
     address_t field_names, field_name_limit;
     bool strings_indirect;
     address_t engine_time = 0;
+    address_t entities = 0, entity_count = 0, entity_base = 0;
 };
 
 constexpr build_def builds[] = {
     {L"plutonium-bootstrapper-win32.exe", t6r::fingerprint::plutonium::regions, std::size(t6r::fingerprint::plutonium::regions), 4,
-     0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true, 0x2338F18},
+     0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true, 0x2338F18,
+     0x2338784, 0x233878C, 0x21C13C0},
     {L"t6zm.exe", t6r::fingerprint::steam::regions, std::size(t6r::fingerprint::steam::regions), 4,
      0x2D3A910, 0x2D3A91C, 0x2D3A500, 0x2D3A580, 0x2D3A680, 0x2B42EA4, true, 0x7E1180, 0x7E115B, true},
     {L"t6zm.exe", t6r::fingerprint::store::regions, std::size(t6r::fingerprint::store::regions), 8,
@@ -50,6 +54,10 @@ enum : std::uint32_t { type_struct = 18, type_entity = 20, type_array = 21 };
 constexpr ULONGLONG attach_interval_ms = 1000;
 constexpr ULONGLONG resolve_interval_ms = 250;
 constexpr int sample_attempts = 4;
+
+constexpr std::uint32_t restart_max_clock = 100;
+constexpr std::uint32_t restart_min_drop = 5;
+constexpr ULONGLONG clock_low_settle_ms = 1000;
 
 struct child {
     std::uint32_t payload;
@@ -123,7 +131,8 @@ constexpr map_wants song_wants[] = {
 
 constexpr profile_def profiles[] = {{songs, 10, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
                                     {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"},
-                                    {nullptr, 0, nullptr, false, {}, nullptr, nullptr, 32, nullptr, true} T6R_EXTRA_PROFILES};
+                                    {nullptr, 0, nullptr, false, {}, nullptr, nullptr, 32, nullptr, true}
+                                    T6R_EXTRA_PROFILES};
 
 struct built_map {
     const char* map;
@@ -160,6 +169,7 @@ struct player_track {
     std::uint32_t bits = 0;
     std::uint32_t int_child[2] = {};
     std::uint32_t array_child = 0;
+    std::uint32_t corpse_child = 0;
     std::unordered_map<std::uint32_t, std::uint32_t> known;
 };
 
@@ -173,6 +183,8 @@ struct state {
     std::uint32_t level = 0;
     std::uint32_t generation = 0;
     std::uint32_t last_clock = 0;
+    bool clock_low = false;
+    ULONGLONG clock_low_since = 0;
     std::int64_t time_origin = INT64_MAX;
     address_t objects = 0, children = 0, values = 0, strings = 0;
     std::uint32_t flag_array = 0;
@@ -197,6 +209,15 @@ struct state {
     ULONGLONG next_set = 0;
     std::unordered_map<std::uint32_t, int> set_keys;
 } g;
+
+SRWLOCK lock = SRWLOCK_INIT;
+
+struct exclusive {
+    exclusive() { AcquireSRWLockExclusive(&lock); }
+    ~exclusive() { ReleaseSRWLockExclusive(&lock); }
+    exclusive(const exclusive&) = delete;
+    exclusive& operator=(const exclusive&) = delete;
+};
 
 bool read(address_t address, void* out, std::size_t size) {
     SIZE_T done = 0;
@@ -335,7 +356,8 @@ void forget_level() {
 std::uint32_t frame_tick(std::uint32_t clock, std::uint32_t engine_time) {
     const std::int64_t delta = std::int64_t{engine_time} - 50 * std::int64_t{clock};
     if (delta < g.time_origin) g.time_origin = delta;
-    return delta - g.time_origin == 50 ? clock + 1 : clock;
+    const std::int64_t ahead = delta - g.time_origin;
+    return ahead == 50 || ahead == 100 ? clock + static_cast<std::uint32_t>(ahead / 50) : clock;
 }
 
 void resolve(std::uint32_t level) {
@@ -467,6 +489,7 @@ void note_field(player_track& player, std::uint32_t index, std::uint32_t key) {
     for (int i = 0; i < 2; ++i)
         if (bits & (4u << i)) player.int_child[i] = index;
     if (bits & 16u) player.array_child = index;
+    if (bits & 2u) player.corpse_child = index;
 }
 
 std::int32_t read_player_array_int(const player_track& player) {
@@ -496,7 +519,7 @@ bool scan_player(player_track& player) {
     if (!read(g.children + player.entity * 8, bounds, sizeof(bounds))) return false;
     player.known.clear();
     player.bits = 0;
-    player.int_child[0] = player.int_child[1] = player.array_child = 0;
+    player.int_child[0] = player.int_child[1] = player.array_child = player.corpse_child = 0;
     std::uint32_t current = bounds[0], previous = 0, steps = 0;
     while (current != 0) {
         child c{};
@@ -567,7 +590,15 @@ void track_players(t6r_sample& out) {
             out.values[player_values + slot] = (player.bits & 1u) ? 1 : 0;
             out.watch_known |= 1u << (player_values + slot);
         }
-        if (g.wanted[1] && (player.bits & 2u)) out.values[corpse_value] |= 1 << slot;
+        if (g.wanted[1] && player.corpse_child) {
+            child corpse{};
+            if (read_child(player.corpse_child, corpse) && corpse.owner == player.entity && corpse.key == g.wanted_keys[1] && corpse.tag == tag_object) {
+                out.values[corpse_value] |= 1 << slot;
+            } else {
+                player.known.erase(player.corpse_child);
+                player.corpse_child = 0;
+            }
+        }
         if (slot == 0)
             for (std::uint32_t i = 0; i < 2; ++i) {
                 if (!g.wanted[2 + i]) continue;
@@ -662,7 +693,9 @@ void read_set(t6r_sample& out, std::uint32_t index) {
     out.watch_known |= 1u << index;
 }
 
-enum class ee_kind { flag, field, length, entity, defined, equals, path, player_int, player_has };
+enum class ee_kind {
+    flag, field, length, entity, defined, equals, path, player_int, player_has
+};
 
 struct ee_watch {
     std::uint32_t index;
@@ -677,6 +710,7 @@ struct ee_map_def {
     const ee_watch* watches;
     std::uint32_t count;
     std::uint32_t built_index;
+    std::uint32_t orb_index = 0, orb_gate = 0;
 };
 
 constexpr ee_watch ee_blackscreen = {0, ee_kind::flag, "initial_blackscreen_passed", nullptr, nullptr};
@@ -733,7 +767,7 @@ constexpr ee_watch ee_tomb[] = {
 };
 constexpr ee_map_def ee_maps[] = {
     {"zm_transit", ee_transit, static_cast<std::uint32_t>(std::size(ee_transit)), 0},
-    {"zm_highrise", ee_highrise, static_cast<std::uint32_t>(std::size(ee_highrise)), 0},
+    {"zm_highrise", ee_highrise, static_cast<std::uint32_t>(std::size(ee_highrise)), 0, 8, 2},
     {"zm_prison", ee_prison, static_cast<std::uint32_t>(std::size(ee_prison)), 0},
     {"zm_buried", ee_buried, static_cast<std::uint32_t>(std::size(ee_buried)), 11},
     {"zm_tomb", ee_tomb, static_cast<std::uint32_t>(std::size(ee_tomb)), 0},
@@ -753,21 +787,35 @@ struct ee_slot {
     std::uint32_t child = 0, key = 0;
 };
 
+struct orb_track {
+    std::int32_t state = 0;
+    std::uint32_t slot = 0;
+    std::uint16_t classname = 0;
+    std::uint32_t scan_clock = 0xFFFFFFFF;
+    bool baseline = false;
+    std::vector<std::uint8_t> was_model;
+    std::vector<std::uint8_t> entities;
+    std::unordered_map<std::uint16_t, bool> model_tokens;
+};
+
 struct ee_state {
     std::uint32_t generation = 0xFFFFFFFF;
     std::uint32_t flag_array = 0;
     const ee_map_def* map = nullptr;
     ee_container level, flags, player;
     ee_slot slots[max_watches];
+    std::uint32_t players_array = 0;
     std::uint32_t player_bounds[2] = {};
     std::unordered_map<std::uint32_t, std::string> names;
+    orb_track orb;
 } ee;
 
 ee_container* ee_owner(const ee_watch& watch) {
     switch (watch.kind) {
     case ee_kind::flag: return &ee.flags;
     case ee_kind::player_int:
-    case ee_kind::player_has: return &ee.player;
+    case ee_kind::player_has:
+        return &ee.player;
     default: return &ee.level;
     }
 }
@@ -885,15 +933,24 @@ std::int32_t ee_value(const ee_watch& watch, ee_slot& slot) {
 }
 
 void ee_track_player() {
+    child field{};
+    std::uint32_t type = 0;
+    if (!g.players_child || !read_child(g.players_child, field) || field.owner != g.level || field.tag != tag_object ||
+        !object_type(field.payload, type) || type != type_array) {
+        g.complete = false;
+        return;
+    }
+    const std::uint32_t array = field.payload;
     std::uint32_t bounds[2] = {};
-    if (!g.players_array || !read(g.children + g.players_array * 8, bounds, sizeof(bounds))) return;
-    if (ee.player.obj && bounds[0] == ee.player_bounds[0] && bounds[1] == ee.player_bounds[1]) return;
+    if (!read(g.children + array * 8, bounds, sizeof(bounds))) return;
+    if (ee.player.obj && array == ee.players_array && bounds[0] == ee.player_bounds[0] && bounds[1] == ee.player_bounds[1]) return;
+    ee.players_array = array;
     ee.player_bounds[0] = bounds[0];
     ee.player_bounds[1] = bounds[1];
     std::uint32_t entity = 0, current = bounds[0], steps = 0;
     while (current != 0 && ++steps <= 64) {
         child c{};
-        if (!read_child(current, c) || c.owner != g.players_array) return;
+        if (!read_child(current, c) || c.owner != array) return;
         if (c.key == 0x800000 && c.tag == tag_object) entity = c.payload;
         current = c.next;
     }
@@ -904,13 +961,83 @@ void ee_track_player() {
         if (ee_owner(ee.map->watches[i]) == &ee.player) ee.slots[i] = ee_slot{};
 }
 
+constexpr std::uint32_t entity_stride = 0x31C, entity_slots = 1024;
+constexpr std::uint32_t entity_in_use = 0xFB, entity_classname = 0x176, entity_origin = 0x134;
+constexpr float orb_starts[2][3] = {{1946.0f, 608.0f, 3338.0f}, {1068.0f, -1362.0f, 3340.5f}};
+constexpr float orb_reach = 49.0f;
+
+bool entity_layout(std::uint32_t& count) {
+    address_t base = 0;
+    return g.build->entities && pointer(g.build->entities, base) && base == g.build->entity_base && u32(g.build->entity_count, count) &&
+           count > 0 && count <= entity_slots;
+}
+
+bool orb_model_class(std::uint16_t token) {
+    if (token == 0) return false;
+    auto known = ee.orb.model_tokens.find(token);
+    if (known != ee.orb.model_tokens.end()) return known->second;
+    char name[64];
+    if (!text(g.strings + static_cast<address_t>(token) * 24 + 4, name, sizeof(name))) return false;
+    return ee.orb.model_tokens.emplace(token, std::strcmp(name, "script_model") == 0).first->second;
+}
+
+bool orb_at_start(const std::uint8_t* entity) {
+    float origin[3];
+    std::memcpy(origin, entity + entity_origin, sizeof(origin));
+    for (const auto& start : orb_starts) {
+        const float dx = origin[0] - start[0], dy = origin[1] - start[1], dz = origin[2] - start[2];
+        if (dx * dx + dy * dy + dz * dz <= orb_reach * orb_reach) return true;
+    }
+    return false;
+}
+
+void read_orb(t6r_sample& out) {
+    orb_track& orb = ee.orb;
+    std::uint32_t count = 0;
+    if (!entity_layout(count)) return;
+    if (orb.state == 0 && out.values[ee.map->orb_gate] != 0) orb.state = 1;
+    if (orb.state == 1 && orb.scan_clock != g.last_clock) {
+        orb.entities.resize(static_cast<std::size_t>(count) * entity_stride);
+        orb.was_model.resize(entity_slots);
+        if (read(g.build->entity_base, orb.entities.data(), orb.entities.size())) {
+            orb.scan_clock = g.last_clock;
+            for (std::uint32_t slot = 0; slot < count; ++slot) {
+                const std::uint8_t* e = orb.entities.data() + static_cast<std::size_t>(slot) * entity_stride;
+                std::uint16_t classname = 0;
+                std::memcpy(&classname, e + entity_classname, sizeof(classname));
+                const bool model = e[entity_in_use] == 1 && orb_model_class(classname);
+                if (model && orb.baseline && !orb.was_model[slot] && orb.state == 1 && orb_at_start(e)) {
+                    orb.state = 2;
+                    orb.slot = slot;
+                    orb.classname = classname;
+                }
+                orb.was_model[slot] = model;
+            }
+            for (std::uint32_t slot = count; slot < entity_slots; ++slot) orb.was_model[slot] = 0;
+            orb.baseline = true;
+        }
+    } else if (orb.state == 2) {
+        std::uint8_t e[entity_stride];
+        if (read(g.build->entity_base + static_cast<address_t>(orb.slot) * entity_stride, e, sizeof(e))) {
+            std::uint16_t classname = 0;
+            std::memcpy(&classname, e + entity_classname, sizeof(classname));
+            if (e[entity_in_use] != 1 || classname != orb.classname) orb.state = 3;
+        }
+    }
+    out.values[ee.map->orb_index] = orb.state;
+    out.watch_known |= 1u << ee.map->orb_index;
+    if (orb.state != 0) out.watch_set |= 1u << ee.map->orb_index;
+}
+
 void read_ee(t6r_sample& out) {
     if (ee.generation != g.generation || ee.flag_array != g.flag_array) {
         ee = ee_state{};
         ee.generation = g.generation;
         ee.flag_array = g.flag_array;
-        for (const ee_map_def& candidate : ee_maps)
-            if (std::strcmp(g.map, candidate.map) == 0) ee.map = &candidate;
+        const ee_map_def* list = ee_maps;
+        std::size_t list_size = std::size(ee_maps);
+        for (std::size_t i = 0; i < list_size; ++i)
+            if (std::strcmp(g.map, list[i].map) == 0) ee.map = &list[i];
         ee.level.obj = g.level;
         ee.flags.obj = g.flag_array;
         ee.flags.strings = true;
@@ -928,6 +1055,7 @@ void read_ee(t6r_sample& out) {
         if (value != 0) out.watch_set |= 1u << watch.index;
     }
     if (ee.map->built_index) read_set(out, ee.map->built_index);
+    if (ee.map->orb_index) read_orb(out);
 }
 
 void read_watches(t6r_sample& out) {
@@ -954,6 +1082,7 @@ T6R_API int t6r_api_version(void) { return T6R_API_VERSION; }
 
 T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
     if (!out) return;
+    exclusive guard;
     std::memset(out, 0, sizeof(*out));
     if (profile >= sizeof(profiles) / sizeof(profiles[0])) return;
 
@@ -974,7 +1103,25 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         std::memset(out->values, 0, sizeof(out->values));
         std::uint32_t clock = 0, level = 0, clock_after = 0, time = 0, time_after = 0;
         if (!u32(g.build->vm_clock, clock) || !u32(g.build->level_root, level)) return;
-        if (level != g.level || clock < g.last_clock) {
+        bool new_level = level != g.level;
+        if (!new_level && clock < g.last_clock) {
+            new_level = clock < restart_max_clock && g.last_clock - clock >= restart_min_drop;
+            const ULONGLONG now = GetTickCount64();
+            if (!new_level && !g.clock_low) {
+                g.clock_low = true;
+                g.clock_low_since = now;
+            }
+            if (!new_level && now - g.clock_low_since < clock_low_settle_ms) {
+                ++out->clock_dips;
+                out->clock = g.last_clock;
+                out->generation = g.generation;
+                out->process_id = GetProcessId(g.process);
+                out->level_id = level;
+                continue;
+            }
+        }
+        g.clock_low = false;
+        if (new_level) {
             g.level = level;
             ++g.generation;
             forget_level();
@@ -1014,6 +1161,10 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
     out->status = T6R_RESOLVING;
     out->watch_known = out->watch_set = 0;
     std::memset(out->values, 0, sizeof(out->values));
+    std::memcpy(out->map, g.map, sizeof(out->map));
 }
 
-T6R_API void t6r_close(void) { close_process(); }
+T6R_API void t6r_close(void) {
+    exclusive guard;
+    close_process();
+}

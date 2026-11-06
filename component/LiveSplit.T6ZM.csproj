@@ -10,8 +10,10 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <Version>0.1.0</Version>
-    <!-- LiveSplit install used only as compile references; override with -p:LiveSplitDir=... -->
+    <!-- LiveSplit install used only as compile references, override with -p:LiveSplitDir=... -->
     <LiveSplitDir Condition="'$(LiveSplitDir)' == ''">$(USERPROFILE)\Desktop\LS</LiveSplitDir>
+    <!-- The native readers build.bat makes first. They are embedded so the component is one file. -->
+    <NativeDir Condition="'$(NativeDir)' == ''">$(MSBuildThisFileDirectory)..\build\native</NativeDir>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="LiveSplit.Core" HintPath="$(LiveSplitDir)\LiveSplit.Core.dll" Private="false" />
@@ -20,4 +22,12 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Xml" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(NativeDir)\x86\t6zm_reader.dll" LogicalName="t6zm_reader.x86.dll" />
+    <EmbeddedResource Include="$(NativeDir)\x64\t6zm_reader.dll" LogicalName="t6zm_reader.x64.dll" />
+  </ItemGroup>
+  <Target Name="CheckNativeReaders" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(NativeDir)\x86\t6zm_reader.dll') Or !Exists('$(NativeDir)\x64\t6zm_reader.dll')"
+           Text="The native readers are missing from $(NativeDir); build with build.bat." />
+  </Target>
 </Project>

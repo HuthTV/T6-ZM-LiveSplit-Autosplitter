@@ -63,9 +63,13 @@ namespace LiveSplit.T6ZM
 
         public virtual bool Continues => false;
 
+        public virtual uint? FrozenGameTicks => null;
+
         public virtual bool OnSample(ReaderSample sample) => false;
 
         public virtual void TimerReset() { }
+
+        public virtual bool CanResume => false;
 
         public virtual string Identity => GetType().Name;
         public virtual string SaveState() => "";
@@ -129,14 +133,19 @@ namespace LiveSplit.T6ZM
         const int RoundWatch = 1;
         const int RoundStartWatch = 2;
 
-        readonly int finalRound;
-        readonly RoundMode splitMode;
-        readonly RoundMode finalMode;
-        readonly bool highRound;
+        int finalRound;
+        RoundMode splitMode;
+        RoundMode finalMode;
+        bool highRound;
         readonly SortedSet<int> milestones = new SortedSet<int>();
         readonly Dictionary<int, uint> reached = new Dictionary<int, uint>();
+        readonly HashSet<int> eligible = new HashSet<int>();
+        readonly HashSet<int> undone = new HashSet<int>();
+        int current;
         readonly List<uint> roundStarts = new List<uint>();
+        readonly List<int> history = new List<int>();
         int released;
+        uint lastTick;
 
         public RoundLogic(IEnumerable<int> splitRounds, int finalRound, bool highRound, RoundMode splitMode, RoundMode finalMode)
         {
@@ -150,6 +159,57 @@ namespace LiveSplit.T6ZM
         public override ReaderProfile Profile => ReaderProfile.Rounds;
 
         public int SplitCount => milestones.Count;
+
+        public void SetLimits(int finalRound, bool highRound)
+        {
+            this.finalRound = finalRound;
+            this.highRound = highRound;
+        }
+
+        public int? ConsumeNext()
+        {
+            if (!(NextMilestone is int round)) return null;
+            released = round;
+            history.Add(round);
+            return round;
+        }
+
+        public void UndoLast(int queued = 0)
+        {
+            int index = history.Count - 1 - queued;
+            if (index < 0) return;
+            int round = history[index];
+            history.RemoveAt(index);
+            released = history.Count > 0 ? history.Max() : 0;
+            eligible.Remove(round);
+            if (round <= current) undone.Add(round);
+        }
+
+        public bool Keeps(int round) => milestones.Contains(round);
+
+        public void Withdraw(int round)
+        {
+            history.Remove(round);
+            eligible.Remove(round);
+            released = history.Count > 0 ? history.Max() : 0;
+        }
+
+        public string Describe(string label)
+        {
+            if (!(RoundOf(label) is int round)) return label;
+            return $"round {round} ({ModeName(ModeOf(round))})";
+        }
+
+        public static int? RoundOf(string label) =>
+            label != null && label.StartsWith("round ") && int.TryParse(label.Substring(6), out int round) ? round : (int?)null;
+
+        static string ModeName(RoundMode mode) => mode == RoundMode.RoundEnd ? "round end" : mode == RoundMode.FadeDone ? "text fade" : "round start";
+
+        public void SetModes(RoundMode split, RoundMode final)
+        {
+            splitMode = split;
+            finalMode = final;
+        }
 
         public void SetSplitRounds(IEnumerable<int> splitRounds)
         {
@@ -181,7 +241,9 @@ namespace LiveSplit.T6ZM
             }
         }
 
-        int? NextMilestone => milestones.Where(r => r > released).Cast<int?>().FirstOrDefault();
+        bool Open(int round) => round > current || eligible.Contains(round);
+
+        int? NextMilestone => milestones.Where(r => r > released && Open(r)).Cast<int?>().FirstOrDefault();
 
         public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
         {
@@ -192,8 +254,14 @@ namespace LiveSplit.T6ZM
             }
 
             if (e.Watch == RoundWatch && e.NewValue > e.OldValue)
+            {
+                current = Math.Max(current, e.NewValue);
                 for (int round = Math.Max(e.OldValue + 1, 2); round <= Math.Min(e.NewValue, 255); round++)
+                {
                     reached[round] = e.Clock;
+                    if (milestones.Contains(round)) eligible.Add(round);
+                }
+            }
             else if (e.Watch == RoundStartWatch)
                 roundStarts.Add(e.Clock);
 
@@ -203,22 +271,43 @@ namespace LiveSplit.T6ZM
         protected override void Reset()
         {
             reached.Clear();
+            eligible.Clear();
+            undone.Clear();
+            current = 0;
             roundStarts.Clear();
+            history.Clear();
             released = 0;
+            lastTick = 0;
         }
+
+        protected override void OnNewLevel() => Reset();
+
+        public override bool CanResume => true;
+
+        public override string SaveState() => string.Join(",", undone.OrderBy(r => r));
 
         public override int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample)
         {
             int last = 0;
+            history.Clear();
             foreach (string label in splits)
-                if (label != null && label.StartsWith("round ") && int.TryParse(label.Substring(6), out int round)) last = Math.Max(last, round);
+                if (RoundOf(label) is int round)
+                {
+                    last = Math.Max(last, round);
+                    history.Add(round);
+                }
             released = last;
-            int current = sample.Known(RoundWatch) ? sample.Values[RoundWatch] : 0;
+            undone.Clear();
+            foreach (string part in (saved ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                if (int.TryParse(part, out int gone)) undone.Add(gone);
+            int now = sample.Known(RoundWatch) ? sample.Values[RoundWatch] : 0;
+            current = Math.Max(current, now);
             int skipped = 0;
-            foreach (int milestone in milestones.Where(r => r > released && r <= current))
+            foreach (int milestone in milestones.Where(r => r > released && r <= now && !undone.Contains(r)))
             {
                 skipped++;
                 released = milestone;
+                history.Add(milestone);
             }
             return skipped;
         }
@@ -227,7 +316,10 @@ namespace LiveSplit.T6ZM
         {
             while (NextMilestone is int round && SplitTick(round) is uint tick)
             {
+                tick = Math.Max(tick, lastTick);
+                lastTick = tick;
                 released = round;
+                history.Add(round);
                 yield return new TimerAction(false, tick, "round " + round);
             }
         }
@@ -237,8 +329,7 @@ namespace LiveSplit.T6ZM
             get
             {
                 if (!(NextMilestone is int round)) return highRound ? "unlimited: no more splits" : "done";
-                string mode = ModeOf(round) == RoundMode.RoundEnd ? "round end" : ModeOf(round) == RoundMode.FadeDone ? "text fade" : "round start";
-                return $"round {round} ({mode})";
+                return $"round {round} ({ModeName(ModeOf(round))})";
             }
         }
     }

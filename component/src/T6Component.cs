@@ -31,8 +31,9 @@ namespace LiveSplit.T6ZM
         uint startGeneration;
         uint baseTicks;
         string lastSplit;
+        string uncertain;
 
-        readonly RunStore store = new RunStore();
+        readonly RunStore store;
         readonly List<SavedSplit> madeSplits = new List<SavedSplit>();
         SavedRun saved;
         DateTime attemptStartUtc;
@@ -43,16 +44,27 @@ namespace LiveSplit.T6ZM
         DateTime? inactiveSince;
         DateTime closingUntil = DateTime.MinValue;
 
-        public T6Component(LiveSplitState state)
+        public T6Component(LiveSplitState state) : this(state, new RunStore()) { }
+
+        internal T6Component(LiveSplitState state, RunStore store)
         {
             this.state = state;
+            this.store = store;
             timer = new TimerModel { CurrentState = state };
             logic = settings.CreateLogic();
             watcher = new Watcher(logic.Profile);
             state.OnReset += OnReset;
+            state.OnSplit += OnManualSplit;
+            state.OnSkipSplit += OnManualSkip;
+            state.OnUndoSplit += OnManualUndo;
             saved = store.Load();
-            if (state.Form != null) state.Form.FormClosing += (s, e) => closingUntil = DateTime.UtcNow.AddSeconds(60);
+            if (state.Form != null) state.Form.FormClosing += OnFormClosing;
         }
+
+        void OnManualSplit(object sender, EventArgs e) => ManualSegment(true);
+        void OnManualSkip(object sender, EventArgs e) => ManualSegment(false);
+        void OnManualUndo(object sender, EventArgs e) => ManualUndo();
+        void OnFormClosing(object sender, FormClosingEventArgs e) => closingUntil = DateTime.UtcNow.AddSeconds(60);
 
         IEnumerable<InfoTextComponent> Rows => settings.ShowInfo ? new[] { statusRow, nextRow } : Array.Empty<InfoTextComponent>();
 
@@ -71,14 +83,43 @@ namespace LiveSplit.T6ZM
 
         bool Active => startClock.HasValue && (state.CurrentPhase == TimerPhase.Running || state.CurrentPhase == TimerPhase.Paused);
 
+        bool ownSplit;
+        bool restarting;
+
+        void ManualSegment(bool split)
+        {
+            if (ownSplit || !Active || !(logic is RoundLogic rounds)) return;
+            int? round;
+            if (pending.Count > 0 && pending.Peek().Kind == ActionKind.Split)
+            {
+                round = RoundLogic.RoundOf(pending.Dequeue().Label);
+            }
+            else round = rounds.ConsumeNext();
+            if (round == null) return;
+            Time made = default(Time);
+            int index = state.CurrentSplitIndex - 1;
+            if (split && index >= 0 && index < state.Run.Count) made = state.Run[index].SplitTime;
+            madeSplits.Add(new SavedSplit { Label = "round " + round, RealTicks = made.RealTime?.Ticks, GameTicks = made.GameTime?.Ticks });
+            SaveRun(watcher.Latest);
+        }
+
+        void ManualUndo()
+        {
+            if (ownSplit || !Active || !(logic is RoundLogic rounds)) return;
+            rounds.UndoLast(pending.Count(a => a.Kind == ActionKind.Split));
+            if (madeSplits.Count > 0) madeSplits.RemoveAt(madeSplits.Count - 1);
+            SaveRun(watcher.Latest);
+        }
+
         void OnReset(object sender, TimerPhase phase)
         {
             startClock = null;
             baseTicks = 0;
             lastSplit = null;
+            uncertain = null;
             pending.Clear();
             madeSplits.Clear();
-            logic.TimerReset();
+            if (!restarting) logic.TimerReset();
             if (inactiveSince == null) inactiveSince = DateTime.UtcNow;
         }
 
@@ -101,14 +142,25 @@ namespace LiveSplit.T6ZM
             else if (settings.RoundsVersion != roundsVersion && logic is RoundLogic rounds)
             {
                 roundsVersion = settings.RoundsVersion;
+                rounds.SetLimits(settings.MaxRound, settings.Unlimited);
                 rounds.SetSplitRounds(settings.SplitRounds);
+                rounds.SetModes(settings.SplitTiming, settings.LastTiming);
+                var kept = new Queue<TimerAction>();
+                foreach (TimerAction queued in pending)
+                {
+                    int queuedRound = RoundLogic.RoundOf(queued.Label) ?? 0;
+                    if (queued.Kind == ActionKind.Split && queuedRound > 0 && !rounds.Keeps(queuedRound)) rounds.Withdraw(queuedRound);
+                    else kept.Enqueue(queued);
+                }
+                pending.Clear();
+                foreach (TimerAction queued in kept) pending.Enqueue(queued);
                 if (Running) foreach (TimerAction action in rounds.Release()) pending.Enqueue(action);
             }
 
             ReaderSample sample = watcher.Latest;
             (logic as BuildablesLogic)?.SetMap(sample.Map);
             (logic as SongsLogic)?.SetMap(sample.Map);
-            (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : 0);
+            (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : (int?)null);
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
             if (saved != null && state.CurrentPhase == TimerPhase.NotRunning && !startClock.HasValue) TryResume(sample);
             Housekeeping();
@@ -129,13 +181,17 @@ namespace LiveSplit.T6ZM
                     {
                         case ActionKind.Start: Start(action, e.Generation); break;
                         case ActionKind.Rebase: Rebase(action, e.Generation); break;
-                        default: pending.Enqueue(action); break;
+                        default:
+                            if (action.Kind == ActionKind.Split && e.Window > 1) uncertain = $"{action.Label} ({e.Window} ticks)";
+                            pending.Enqueue(action);
+                            break;
                     }
                 }
             }
 
             if (state.CurrentPhase == TimerPhase.NotRunning && logic.PendingStart is uint due
-                && sample.Generation == logic.PendingGeneration && sample.Status >= ReaderStatus.Resolving && sample.Clock >= due)
+                && sample.Generation == logic.PendingGeneration && sample.Status >= ReaderStatus.Resolving && sample.Clock >= due
+                && !(sample.Known(0) && sample.Values[0] != 0))
                 Start(logic.StartRun(due), sample.Generation);
 
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
@@ -151,13 +207,15 @@ namespace LiveSplit.T6ZM
                 if (next.Kind == ActionKind.Skip)
                 {
                     madeSplits.Add(new SavedSplit { Label = "(skipped)" });
-                    timer.SkipSplit();
+                    ownSplit = true;
+                    try { timer.SkipSplit(); } finally { ownSplit = false; }
                     SaveRun(sample);
                     continue;
                 }
                 state.SetGameTime(Ticks(baseTicks + next.Tick - startClock.Value));
                 int index = state.CurrentSplitIndex;
-                timer.Split();
+                ownSplit = true;
+                try { timer.Split(); } finally { ownSplit = false; }
                 lastSplit = next.Label;
                 Time made = index >= 0 && index < state.Run.Count ? state.Run[index].SplitTime : default(Time);
                 madeSplits.Add(new SavedSplit { Label = next.Label, RealTicks = made.RealTime?.Ticks, GameTicks = made.GameTime?.Ticks });
@@ -166,11 +224,12 @@ namespace LiveSplit.T6ZM
             if (live && Running)
             {
                 state.IsGameTimePaused = true;
-                state.SetGameTime(Ticks(baseTicks + sample.Clock - startClock.Value));
+                state.SetGameTime(Ticks(logic.FrozenGameTicks ?? baseTicks + sample.Clock - startClock.Value));
             }
             if (Active && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel) lastClockSeen = sample.Clock;
             if (Active && DateTime.UtcNow - lastSave > TimeSpan.FromSeconds(2)) SaveRun(sample);
 
+            statusRow.InformationName = StatusName(sample);
             statusRow.InformationValue = Status(sample);
             nextRow.InformationValue = Next();
             foreach (InfoTextComponent row in Rows) row.Update(invalidator, state, width, height, mode);
@@ -181,7 +240,8 @@ namespace LiveSplit.T6ZM
             if (state.CurrentPhase != TimerPhase.NotRunning)
             {
                 if (!logic.Continues) return;
-                timer.Reset();
+                restarting = true;
+                try { timer.Reset(); } finally { restarting = false; }
             }
             timer.Start();
             timer.InitializeGameTime();
@@ -235,7 +295,7 @@ namespace LiveSplit.T6ZM
 
         void SaveRun(ReaderSample sample)
         {
-            if (!Active || attemptProcess == 0) return;
+            if (!Active || attemptProcess == 0 || !logic.CanResume) return;
             lastSave = DateTime.UtcNow;
             bool paused = state.CurrentPhase == TimerPhase.Paused;
             store.Save(new SavedRun
@@ -270,6 +330,12 @@ namespace LiveSplit.T6ZM
 
         void TryResume(ReaderSample sample)
         {
+            if (!logic.CanResume)
+            {
+                store.Delete();
+                saved = null;
+                return;
+            }
             if (sample.Status < ReaderStatus.Ready || sample.ProcessId == 0) return;
             long processStart = ProcessStartTicks(sample.ProcessId);
             if (!saved.Matches(sample, processStart, logic.Identity, state.Run.Count))
@@ -321,22 +387,45 @@ namespace LiveSplit.T6ZM
 
         static TimeSpan Ticks(uint ticks) => TimeSpan.FromTicks(Tick.Ticks * ticks);
 
+        string StatusName(ReaderSample s) => s.Status == ReaderStatus.NoProcess ? "waiting for game process" : ExeName(s.ProcessId);
+
+        string exeName = "";
+        uint exeProcess;
+
+        string ExeName(uint processId)
+        {
+            if (processId == 0) return "game";
+            if (processId != exeProcess)
+            {
+                exeProcess = processId;
+                try
+                {
+                    using (Process process = Process.GetProcessById((int)processId)) exeName = process.ProcessName + ".exe";
+                }
+                catch (Exception)
+                {
+                    exeName = "game";
+                }
+            }
+            return exeName;
+        }
+
         string Status(ReaderSample s)
         {
             if (watcher.Error != null) return "reader error: " + watcher.Error;
             switch (s.Status)
             {
-                case ReaderStatus.NoProcess: return "waiting for game";
+                case ReaderStatus.NoProcess: return "";
                 case ReaderStatus.Unsupported: return "unsupported game build";
-                case ReaderStatus.NoLevel: return Running ? "no level: game time paused" : "no level (menu or client)";
+                case ReaderStatus.NoLevel: return Running ? "waiting for map, game time paused" : "waiting for map";
                 case ReaderStatus.Resolving: return $"{Map(s)} resolving";
                 default:
                     string round = logic.Profile == ReaderProfile.Rounds && s.Known(1) ? $"round {s.Values[1]}, " : "";
-                    return $"{Map(s)} {round}tick {s.Clock}";
+                    return $"{Map(s)} {round}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
             }
         }
 
-        static string Map(ReaderSample s) => string.IsNullOrEmpty(s.Map) ? "map ?" : s.Map;
+        static string Map(ReaderSample s) => GameMaps.Name(s.Map);
 
         string Next()
         {
@@ -345,12 +434,16 @@ namespace LiveSplit.T6ZM
                 case TimerPhase.NotRunning:
                     ReaderSample latest = watcher.Latest;
                     if (latest.Status >= ReaderStatus.Resolving && !string.IsNullOrEmpty(latest.Map) && !logic.SupportsMap(latest.Map))
-                        return $"waiting for start: {latest.Map} not supported";
+                        return $"waiting for start: {GameMaps.Name(latest.Map)} not supported";
                     if (latest.Status >= ReaderStatus.Resolving && logic.StartBlocked is string blocked)
                         return $"waiting for start: {blocked}";
+                    if (latest.Status >= ReaderStatus.Ready && latest.Known(0) && latest.Values[0] != 0) return "waiting on map restart";
                     return "start: player control";
                 case TimerPhase.Running:
-                case TimerPhase.Paused: return startClock.HasValue ? logic.Next : "started manually, no game time";
+                case TimerPhase.Paused:
+                    if (!startClock.HasValue) return "started manually, no game time";
+                    if (pending.Count > 0 && logic is RoundLogic pendingRounds) return pendingRounds.Describe(pending.Peek().Label);
+                    return logic.Next;
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }
         }
@@ -399,8 +492,28 @@ namespace LiveSplit.T6ZM
         public void Dispose()
         {
             state.OnReset -= OnReset;
+            state.OnSplit -= OnManualSplit;
+            state.OnSkipSplit -= OnManualSkip;
+            state.OnUndoSplit -= OnManualUndo;
+            if (state.Form != null) state.Form.FormClosing -= OnFormClosing;
             watcher.Dispose();
             settings.Dispose();
+        }
+    }
+    internal static class GameMaps
+    {
+        public static string Name(string script)
+        {
+            switch (script)
+            {
+                case "zm_transit": return "TranZit";
+                case "zm_nuked": return "Nuketown";
+                case "zm_highrise": return "Die Rise";
+                case "zm_prison": return "Mob of the Dead";
+                case "zm_buried": return "Buried";
+                case "zm_tomb": return "Origins";
+                default: return string.IsNullOrEmpty(script) ? "map ?" : script;
+            }
         }
     }
 }

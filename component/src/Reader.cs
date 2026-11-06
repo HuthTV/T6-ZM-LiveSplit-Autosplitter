@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace LiveSplit.T6ZM
 {
@@ -21,6 +22,7 @@ namespace LiveSplit.T6ZM
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Map;
         public uint ProcessId;
         public uint LevelId;
+        public uint ClockDips;
 
         public bool Known(int watch) => (WatchKnown & (1u << watch)) != 0;
     }
@@ -28,16 +30,53 @@ namespace LiveSplit.T6ZM
     internal static class Reader
     {
         const string Dll = "t6zm_reader.dll";
-        const int ApiVersion = 6;
+        const int ApiVersion = 7;
 
         static Reader()
         {
-            string components = Path.GetDirectoryName(typeof(Reader).Assembly.Location);
-            string path = Path.Combine(components, Environment.Is64BitProcess ? "x64" : "x86", Dll);
+            string resource = Environment.Is64BitProcess ? "t6zm_reader.x64.dll" : "t6zm_reader.x86.dll";
+            byte[] image;
+            using (Stream stream = typeof(Reader).Assembly.GetManifestResourceStream(resource))
+            {
+                if (stream == null) throw new DllNotFoundException($"{resource} is missing from the component.");
+                image = new byte[stream.Length];
+                int read = 0;
+                while (read < image.Length)
+                {
+                    int got = stream.Read(image, read, image.Length - read);
+                    if (got <= 0) throw new IOException($"Could not read {resource}.");
+                    read += got;
+                }
+            }
+            string hash;
+            using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(image), 0, 8).Replace("-", "");
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LiveSplit.T6ZM", hash);
+            string path = Path.Combine(folder, Dll);
+            if (!File.Exists(path) || new FileInfo(path).Length != image.Length)
+            {
+                Directory.CreateDirectory(folder);
+                string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllBytes(temp, image);
+                try { File.Move(temp, path); }
+                catch (IOException) { File.Delete(temp); }
+            }
             if (LoadLibrary(path) == IntPtr.Zero)
                 throw new DllNotFoundException($"Could not load {path} (error {Marshal.GetLastWin32Error()}).");
             if (t6r_api_version() != ApiVersion)
                 throw new InvalidOperationException("t6zm_reader.dll does not match this component version.");
+            RemoveOldVersions(Path.GetDirectoryName(folder), hash);
+        }
+
+        static void RemoveOldVersions(string root, string current)
+        {
+            try
+            {
+                foreach (string folder in Directory.GetDirectories(root))
+                    if (!string.Equals(Path.GetFileName(folder), current, StringComparison.OrdinalIgnoreCase))
+                        try { Directory.Delete(folder, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         public static ReaderSample Poll(ReaderProfile profile)
