@@ -26,7 +26,7 @@ namespace LiveSplit.T6ZM
         RunLogic logic;
         bool timingMethodSet;
         int logicVersion = -1;
-        int roundsVersion = -1;
+        int liveVersion = -1;
         uint? startClock;
         uint startGeneration;
         uint baseTicks;
@@ -88,25 +88,19 @@ namespace LiveSplit.T6ZM
 
         void ManualSegment(bool split)
         {
-            if (ownSplit || !Active || !(logic is RoundLogic rounds)) return;
-            int? round;
-            if (pending.Count > 0 && pending.Peek().Kind == ActionKind.Split)
-            {
-                round = RoundLogic.RoundOf(pending.Dequeue().Label);
-            }
-            else round = rounds.ConsumeNext();
-            if (round == null) return;
+            if (ownSplit || !Active) return;
+            string label = logic.ManualSegment(pending);
+            if (label == null) return;
             Time made = default(Time);
             int index = state.CurrentSplitIndex - 1;
             if (split && index >= 0 && index < state.Run.Count) made = state.Run[index].SplitTime;
-            madeSplits.Add(new SavedSplit { Label = "round " + round, RealTicks = made.RealTime?.Ticks, GameTicks = made.GameTime?.Ticks });
+            madeSplits.Add(new SavedSplit { Label = label, RealTicks = made.RealTime?.Ticks, GameTicks = made.GameTime?.Ticks });
             SaveRun(watcher.Latest);
         }
 
         void ManualUndo()
         {
-            if (ownSplit || !Active || !(logic is RoundLogic rounds)) return;
-            rounds.UndoLast(pending.Count(a => a.Kind == ActionKind.Split));
+            if (ownSplit || !Active || !logic.ManualUndo(pending)) return;
             if (madeSplits.Count > 0) madeSplits.RemoveAt(madeSplits.Count - 1);
             SaveRun(watcher.Latest);
         }
@@ -132,35 +126,21 @@ namespace LiveSplit.T6ZM
             }
 
             settings.Locked = state.CurrentPhase != TimerPhase.NotRunning;
+            settings.TimingsHeld = Running && logic.HoldsLiveSettings;
             if (state.CurrentPhase == TimerPhase.NotRunning && settings.Version != logicVersion)
             {
                 logicVersion = settings.Version;
-                roundsVersion = settings.RoundsVersion;
+                liveVersion = settings.LiveVersion;
                 logic = settings.CreateLogic();
                 watcher.Profile = logic.Profile;
             }
-            else if (settings.RoundsVersion != roundsVersion && logic is RoundLogic rounds)
+            else if (settings.LiveVersion != liveVersion)
             {
-                roundsVersion = settings.RoundsVersion;
-                rounds.SetLimits(settings.MaxRound, settings.Unlimited);
-                rounds.SetSplitRounds(settings.SplitRounds);
-                rounds.SetModes(settings.SplitTiming, settings.LastTiming);
-                var kept = new Queue<TimerAction>();
-                foreach (TimerAction queued in pending)
-                {
-                    int queuedRound = RoundLogic.RoundOf(queued.Label) ?? 0;
-                    if (queued.Kind == ActionKind.Split && queuedRound > 0 && !rounds.Keeps(queuedRound)) rounds.Withdraw(queuedRound);
-                    else kept.Enqueue(queued);
-                }
-                pending.Clear();
-                foreach (TimerAction queued in kept) pending.Enqueue(queued);
-                if (Running) foreach (TimerAction action in rounds.Release()) pending.Enqueue(action);
+                liveVersion = settings.LiveVersion;
+                logic.ApplyLiveSettings(settings.LiveValues, pending, Running);
             }
 
             ReaderSample sample = watcher.Latest;
-            (logic as BuildablesLogic)?.SetMap(sample.Map);
-            (logic as SongsLogic)?.SetMap(sample.Map);
-            (logic as RainbowLogic)?.SetLevel(sample.Map, sample.Known(RainbowLogic.PlayersWatch) ? sample.Values[RainbowLogic.PlayersWatch] : (int?)null);
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
             if (saved != null && state.CurrentPhase == TimerPhase.NotRunning && !startClock.HasValue) TryResume(sample);
             Housekeeping();
@@ -191,7 +171,7 @@ namespace LiveSplit.T6ZM
 
             if (state.CurrentPhase == TimerPhase.NotRunning && logic.PendingStart is uint due
                 && sample.Generation == logic.PendingGeneration && sample.Status >= ReaderStatus.Resolving && sample.Clock >= due
-                && !(sample.Known(0) && sample.Values[0] != 0))
+                && !(sample.Known(RunLogic.BlackscreenWatch) && sample.Values[RunLogic.BlackscreenWatch] != 0))
                 Start(logic.StartRun(due), sample.Generation);
 
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
@@ -420,8 +400,8 @@ namespace LiveSplit.T6ZM
                 case ReaderStatus.NoLevel: return Running ? "waiting for map, game time paused" : "waiting for map";
                 case ReaderStatus.Resolving: return $"{Map(s)} resolving";
                 default:
-                    string round = logic.Profile == ReaderProfile.Rounds && s.Known(1) ? $"round {s.Values[1]}, " : "";
-                    return $"{Map(s)} {round}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
+                    string detail = logic.StatusDetail(s) is string text ? text + ", " : "";
+                    return $"{Map(s)} {detail}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
             }
         }
 
@@ -437,13 +417,12 @@ namespace LiveSplit.T6ZM
                         return $"waiting for start: {GameMaps.Name(latest.Map)} not supported";
                     if (latest.Status >= ReaderStatus.Resolving && logic.StartBlocked is string blocked)
                         return $"waiting for start: {blocked}";
-                    if (latest.Status >= ReaderStatus.Ready && latest.Known(0) && latest.Values[0] != 0) return "waiting on map restart";
+                    if (latest.Status >= ReaderStatus.Ready && latest.Known(RunLogic.BlackscreenWatch) && latest.Values[RunLogic.BlackscreenWatch] != 0) return "waiting on map restart";
                     return "start: player control";
                 case TimerPhase.Running:
                 case TimerPhase.Paused:
                     if (!startClock.HasValue) return "started manually, no game time";
-                    if (pending.Count > 0 && logic is RoundLogic pendingRounds) return pendingRounds.Describe(pending.Peek().Label);
-                    return logic.Next;
+                    return pending.Count > 0 ? logic.NextWaiting(pending.Peek()) : logic.Next;
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }
         }
@@ -498,22 +477,6 @@ namespace LiveSplit.T6ZM
             if (state.Form != null) state.Form.FormClosing -= OnFormClosing;
             watcher.Dispose();
             settings.Dispose();
-        }
-    }
-    internal static class GameMaps
-    {
-        public static string Name(string script)
-        {
-            switch (script)
-            {
-                case "zm_transit": return "TranZit";
-                case "zm_nuked": return "Nuketown";
-                case "zm_highrise": return "Die Rise";
-                case "zm_prison": return "Mob of the Dead";
-                case "zm_buried": return "Buried";
-                case "zm_tomb": return "Origins";
-                default: return string.IsNullOrEmpty(script) ? "map ?" : script;
-            }
         }
     }
 }

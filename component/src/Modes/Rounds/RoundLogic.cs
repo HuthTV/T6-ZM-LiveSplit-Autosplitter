@@ -4,123 +4,6 @@ using System.Linq;
 
 namespace LiveSplit.T6ZM
 {
-    internal enum ActionKind
-    {
-        Start,
-        Split,
-        Rebase,
-        Pause,
-        Skip,
-    }
-
-    internal readonly struct TimerAction
-    {
-        public TimerAction(bool start, uint tick, string label) : this(start ? ActionKind.Start : ActionKind.Split, tick, label, 0) { }
-
-        public TimerAction(ActionKind kind, uint tick, string label, uint baseTicks)
-        {
-            Kind = kind;
-            Tick = tick;
-            Label = label;
-            BaseTicks = baseTicks;
-        }
-
-        public ActionKind Kind { get; }
-        public bool Start => Kind == ActionKind.Start;
-        public uint Tick { get; }
-        public string Label { get; }
-        public uint BaseTicks { get; }
-    }
-
-    internal abstract class RunLogic
-    {
-        protected const int BlackscreenWatch = 0;
-        protected const int CorpseWatch = 6;
-        const uint AfterlifeUnfreezeTicks = 30;
-
-        public abstract ReaderProfile Profile { get; }
-
-        public uint? PendingStart { get; private set; }
-        public uint PendingGeneration { get; private set; }
-
-        protected bool BlackscreenEnded(GameEvent e)
-        {
-            if (Became(e, CorpseWatch) && PendingStart == null)
-            {
-                PendingStart = e.Clock + AfterlifeUnfreezeTicks;
-                PendingGeneration = e.Generation;
-            }
-            return Became(e, BlackscreenWatch);
-        }
-
-        public void NewLevel()
-        {
-            PendingStart = null;
-            OnNewLevel();
-        }
-
-        protected virtual void OnNewLevel() { }
-
-        public virtual bool Continues => false;
-
-        public virtual uint? FrozenGameTicks => null;
-
-        public virtual bool OnSample(ReaderSample sample) => false;
-
-        public virtual void TimerReset() { }
-
-        public virtual bool CanResume => false;
-
-        public virtual string Identity => GetType().Name;
-        public virtual string SaveState() => "";
-        public virtual int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample) => 0;
-
-        public virtual bool SupportsMap(string script) => true;
-
-        public virtual string StartBlocked => null;
-
-        public TimerAction StartRun(uint tick)
-        {
-            PendingStart = null;
-            Reset();
-            return new TimerAction(true, tick, "start");
-        }
-
-        protected abstract void Reset();
-
-        public abstract IEnumerable<TimerAction> OnChange(GameEvent e, bool running);
-
-        public abstract string Next { get; }
-
-        protected static bool Became(GameEvent e, int watch) => e.Watch == watch && e.OldValue == 0 && e.NewValue != 0;
-    }
-
-    internal sealed class PackAPunchLogic : RunLogic
-    {
-        const int FirstSlotWatch = 1;
-
-        bool split;
-
-        public override ReaderProfile Profile => ReaderProfile.PackAPunch;
-
-        public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
-        {
-            if (!running)
-            {
-                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
-            }
-            else if (!split && e.Watch >= FirstSlotWatch && e.Watch < FirstSlotWatch + 4 && Became(e, e.Watch))
-            {
-                split = true;
-                yield return new TimerAction(false, e.Clock, $"player {e.Watch - FirstSlotWatch + 1} pack-a-punch");
-            }
-        }
-
-        protected override void Reset() => split = false;
-
-        public override string Next => split ? "done" : "a player takes a PaP weapon";
-    }
-
     internal enum RoundMode
     {
         RoundEnd = 1,
@@ -128,9 +11,27 @@ namespace LiveSplit.T6ZM
         RoundStart = 3,
     }
 
+    internal sealed class RoundSettings : LiveSettings
+    {
+        public RoundSettings(IEnumerable<int> splitRounds, int maxRound, bool unlimited, RoundMode splitTiming, RoundMode lastTiming)
+        {
+            SplitRounds = splitRounds;
+            MaxRound = maxRound;
+            Unlimited = unlimited;
+            SplitTiming = splitTiming;
+            LastTiming = lastTiming;
+        }
+
+        public IEnumerable<int> SplitRounds { get; }
+        public int MaxRound { get; }
+        public bool Unlimited { get; }
+        public RoundMode SplitTiming { get; }
+        public RoundMode LastTiming { get; }
+    }
+
     internal sealed class RoundLogic : RunLogic
     {
-        const int RoundWatch = 1;
+        internal const int RoundWatch = 1;
         const int RoundStartWatch = 2;
 
         int finalRound;
@@ -146,6 +47,7 @@ namespace LiveSplit.T6ZM
         readonly List<int> history = new List<int>();
         int released;
         uint lastTick;
+        bool betweenRounds;
 
         public RoundLogic(IEnumerable<int> splitRounds, int finalRound, bool highRound, RoundMode splitMode, RoundMode finalMode)
         {
@@ -205,6 +107,49 @@ namespace LiveSplit.T6ZM
 
         static string ModeName(RoundMode mode) => mode == RoundMode.RoundEnd ? "round end" : mode == RoundMode.FadeDone ? "text fade" : "round start";
 
+        public bool BetweenRounds => betweenRounds;
+
+        public override bool HoldsLiveSettings => BetweenRounds;
+
+        public override void ApplyLiveSettings(LiveSettings values, Queue<TimerAction> waiting, bool running)
+        {
+            if (!(values is RoundSettings settings)) return;
+            SetLimits(settings.MaxRound, settings.Unlimited);
+            SetSplitRounds(settings.SplitRounds);
+            SetModes(settings.SplitTiming, settings.LastTiming);
+            var kept = new Queue<TimerAction>();
+            foreach (TimerAction queued in waiting)
+            {
+                int queuedRound = RoundOf(queued.Label) ?? 0;
+                if (queued.Kind == ActionKind.Split && queuedRound > 0 && !Keeps(queuedRound)) Withdraw(queuedRound);
+                else kept.Enqueue(queued);
+            }
+            waiting.Clear();
+            foreach (TimerAction queued in kept) waiting.Enqueue(queued);
+            if (running) foreach (TimerAction action in Release()) waiting.Enqueue(action);
+        }
+
+        public override string ManualSegment(Queue<TimerAction> waiting)
+        {
+            int? round;
+            if (waiting.Count > 0 && waiting.Peek().Kind == ActionKind.Split)
+            {
+                round = RoundOf(waiting.Dequeue().Label);
+            }
+            else round = ConsumeNext();
+            return round == null ? null : "round " + round;
+        }
+
+        public override bool ManualUndo(IReadOnlyCollection<TimerAction> waiting)
+        {
+            UndoLast(waiting.Count(a => a.Kind == ActionKind.Split));
+            return true;
+        }
+
+        public override string StatusDetail(ReaderSample sample) => sample.Known(RoundWatch) ? $"round {sample.Values[RoundWatch]}" : null;
+
+        public override string NextWaiting(TimerAction waiting) => Describe(waiting.Label);
+
         public void SetModes(RoundMode split, RoundMode final)
         {
             splitMode = split;
@@ -256,6 +201,7 @@ namespace LiveSplit.T6ZM
             if (e.Watch == RoundWatch && e.NewValue > e.OldValue)
             {
                 current = Math.Max(current, e.NewValue);
+                betweenRounds = true;
                 for (int round = Math.Max(e.OldValue + 1, 2); round <= Math.Min(e.NewValue, 255); round++)
                 {
                     reached[round] = e.Clock;
@@ -263,7 +209,10 @@ namespace LiveSplit.T6ZM
                 }
             }
             else if (e.Watch == RoundStartWatch)
+            {
                 roundStarts.Add(e.Clock);
+                betweenRounds = false;
+            }
 
             foreach (TimerAction action in Release()) yield return action;
         }
@@ -278,6 +227,7 @@ namespace LiveSplit.T6ZM
             history.Clear();
             released = 0;
             lastTick = 0;
+            betweenRounds = false;
         }
 
         protected override void OnNewLevel() => Reset();

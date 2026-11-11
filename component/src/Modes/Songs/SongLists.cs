@@ -1,0 +1,71 @@
+using System.Linq;
+
+namespace LiveSplit.T6ZM
+{
+    internal sealed class SongStep : Step
+    {
+        public const int Event = -1;
+
+        public SongStep(string label, int watch, int level, bool extra = false) : base(label, label)
+        {
+            Watch = watch;
+            Level = level;
+            Extra = extra;
+        }
+
+        public int Watch { get; }
+        public int Level { get; }
+        public bool Extra { get; }
+    }
+
+    internal sealed class SongMap : StepList<SongStep>
+    {
+        public SongMap(string key, string script, string song, params SongStep[] steps)
+            : base(key, script, steps, $"({GameMaps.Name(script)}) {song}", forced: 1u << (steps.Length - 1)) { }
+
+        public override uint Default
+        {
+            get
+            {
+                uint mask = 0;
+                for (int i = 0; i < Steps.Count; i++)
+                    if (!Steps[i].Extra) mask |= 1u << i;
+                return mask | Forced;
+            }
+        }
+    }
+
+    internal static class SongMaps
+    {
+        static SongStep[] Counted(string what, int watch) =>
+            Enumerable.Range(1, 3).Select(n => new SongStep($"{what} {n}", watch, n)).ToArray();
+
+        static SongMap Song(string key, string script, string song, params SongStep[][] groups) =>
+            new SongMap(key, script, song, groups.SelectMany(g => g).ToArray());
+
+        static SongStep[] Start(string song) => new[] { new SongStep(song, SongStep.Event, 0) };
+
+        static SongStep[] Rounds(int last) =>
+            Enumerable.Range(1, last).Select(k => new SongStep($"End of round {k}", SongsLogic.RoundWatch, k + 1, true)).ToArray();
+
+        static SongStep[] Extra(string label, int watch) => new[] { new SongStep(label, watch, 1, true) };
+
+        public static readonly SongMap[] All =
+        {
+            Song("transit_carrion", "zm_transit", "Carrion", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("nuked_samantha", "zm_nuked", "Samantha's Lullaby", Rounds(2), Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("nuked_redamned", "zm_nuked", "Re-Damned", Rounds(6), Start("Re-Damned")),
+            Song("nuked_cominghome", "zm_nuked", "Coming Home", Rounds(6), Start("Coming Home")),
+            Song("highrise_fall", "zm_highrise", "We All Fall Down", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("prison_rustycage", "zm_prison", "Rusty Cage", Counted("Bottle", SongsLogic.MeteorWatch)),
+            Song("prison_whereare", "zm_prison", "Where Are We Going", Start("Afterlife revive"), Start("Where Are We Going")),
+            Song("buried_running", "zm_buried", "Always Running", Counted("Teddy", SongsLogic.MeteorWatch)),
+            Song("tomb_shepherd", "zm_tomb", "Shepherd of Fire", Rounds(4), Counted("Radio", SongsLogic.RadioWatch)),
+            Song("tomb_archangel", "zm_tomb", "Archangel", Rounds(4), Counted("Green stone", SongsLogic.MeteorWatch)),
+            Song("tomb_aether", "zm_tomb", "Aether", Extra("No Man's Land", SongsLogic.NmlWatch), Rounds(4),
+                new[] { new SongStep("Aether", SongsLogic.AetherWatch, 3) }),
+        };
+
+        public static SongMap ByKey(string key) => All.FirstOrDefault(m => m.Key == key);
+    }
+}
