@@ -8,6 +8,8 @@ namespace LiveSplit.T6ZM
 
         public abstract IEnumerable<EeHit> OnChange(GameEvent e);
 
+        public virtual int Branch => 0;
+
         public static EeDetector Create(string script)
         {
             switch (script)

@@ -129,7 +129,7 @@ namespace LiveSplit.T6ZM
             }
         }
 
-        EeMap Part(EeMap eeMap) => eeMap.Branches == null ? eeMap : (((detector as TransitDetector)?.Side == TransitSide.Maxis) ? eeMap.Branches[1] : eeMap.Branches[0]);
+        EeMap Part(EeMap eeMap) => eeMap.Branches == null ? eeMap : eeMap.Branches[detector?.Branch ?? 0];
 
         uint Mask(EeMap part, bool players)
         {

@@ -17,6 +17,8 @@ namespace LiveSplit.T6ZM
 
         public TransitSide Side { get; private set; }
 
+        public override int Branch => Side == TransitSide.Maxis ? 1 : 0;
+
         public override IEnumerable<EeHit> OnChange(GameEvent e)
         {
             switch (e.Watch)

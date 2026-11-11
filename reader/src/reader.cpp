@@ -754,6 +754,9 @@ constexpr ee_watch ee_buried[] = {
     {8, ee_kind::field, "buried_sq_richtofen_complete", nullptr, nullptr},
     {9, ee_kind::field, "metagame_sq_maxis_complete", nullptr, nullptr},
     {10, ee_kind::field, "metagame_sq_richtofen_complete", nullptr, nullptr},
+    {12, ee_kind::flag, "sq_is_max_tower_built", nullptr, nullptr},
+    {13, ee_kind::flag, "sq_ip_puzzle_complete", nullptr, nullptr},
+    {14, ee_kind::field, "sq_ml_curr_lever", nullptr, nullptr},
 };
 constexpr ee_watch ee_tomb[] = {
     ee_blackscreen,

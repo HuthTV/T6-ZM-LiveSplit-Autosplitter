@@ -87,6 +87,25 @@ namespace LiveSplit.T6ZM
 
         static readonly EeMap DieRise = new EeMap("zm_highrise", Steps(Symbols, Perks));
 
+        static readonly EeStep Boxhit = new EeStep("boxhit", "Boxhit", "flag chest_has_been_used");
+        static readonly EeStep Ghosts = new EeStep("ghosts", "Ghosts", "flag spawn_ghosts");
+        static readonly EeStep Levers = new EeStep("bells_levers", "Levers", "level.sq_ml_curr_lever first reaches 4, right or wrong (Richtofen)");
+        static readonly EeStep Bells = new EeStep("bells_levers", "Bells", "flag sq_ip_puzzle_complete (Maxis)");
+        static readonly EeMap BuriedRichtofen = new EeMap("zm_buried",
+            solo: Steps(Boxhit, Ghosts, Cipher, TimeTravel, Levers, Sharpshooter),
+            coop: Steps(Cipher, TimeTravel, Levers, Sharpshooter), branch: "Richtofen");
+        static readonly EeMap BuriedMaxis = new EeMap("zm_buried",
+            solo: Steps(Boxhit, Ghosts, Cipher, TimeTravel, Bells, Sharpshooter),
+            coop: Steps(Cipher, TimeTravel, Bells, Sharpshooter), branch: "Maxis");
+        static readonly EeMap Buried = new EeMap("zm_buried", BuriedRichtofen.Solo, BuriedRichtofen.Coop,
+            branches: new[] { BuriedRichtofen, BuriedMaxis });
+
+        static EeMap WithMinedGames(EeMap part) => new EeMap(part.Script,
+            Steps(part.Solo.Concat(new[] { MinedGames }).ToArray()), Steps(part.Coop.Concat(new[] { MinedGames }).ToArray()),
+            branch: part.Branch);
+        static readonly EeMap SuperBuriedRichtofen = WithMinedGames(BuriedRichtofen);
+        static readonly EeMap SuperBuriedMaxis = WithMinedGames(BuriedMaxis);
+
         public static readonly EeMap[] All =
         {
             Transit,
@@ -104,10 +123,7 @@ namespace LiveSplit.T6ZM
                     new EeStep("headphones", "Headphones", "level.m_headphones deleted (the last audio log has ended)")),
                 coop: Steps(Plane1, Plane2, Plane3, Codes,
                     new EeStep("fight", "Showdown", "level.winner is set, split 2 s later"))),
-            new EeMap("zm_buried",
-                solo: Steps(new EeStep("boxhit", "Boxhit", "flag chest_has_been_used"),
-                    new EeStep("ghosts", "Ghosts", "flag spawn_ghosts"), Cipher, TimeTravel, Sharpshooter),
-                coop: Steps(Cipher, TimeTravel, Sharpshooter)),
+            Buried,
             new EeMap("zm_tomb",
                 solo: Steps(new EeStep("NML", "NML", "flag activate_zone_nml"), Boxes,
                     new EeStep("staff_1", "Staff I", "level.n_staffs_crafted reaches 1"),
@@ -124,9 +140,8 @@ namespace LiveSplit.T6ZM
         {
             Transit,
             DieRise,
-            new EeMap("zm_buried",
-                solo: Steps(All[3].Solo.Concat(new[] { MinedGames }).ToArray()),
-                coop: Steps(All[3].Coop.Concat(new[] { MinedGames }).ToArray())),
+            new EeMap("zm_buried", SuperBuriedRichtofen.Solo, SuperBuriedRichtofen.Coop,
+                branches: new[] { SuperBuriedRichtofen, SuperBuriedMaxis }),
         };
 
         public static EeMap For(string script, bool super) => (super ? Super : All).FirstOrDefault(m => m.Script == script);

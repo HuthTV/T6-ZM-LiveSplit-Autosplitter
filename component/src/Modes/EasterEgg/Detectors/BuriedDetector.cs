@@ -13,13 +13,30 @@ namespace LiveSplit.T6ZM
         const int MaxisMetagameWatch = 9;
         const int RichtofenMetagameWatch = 10;
         const int BuiltWatch = 11;
+        const int MaxisTowerWatch = 12;
+        const int BellsWatch = 13;
+        const int LeversWatch = 14;
 
         const int OilLampBit = 6;
+        const int LeverCount = 4;
+
+        bool maxis;
+
+        public override int Branch => maxis ? 1 : 0;
 
         public override IEnumerable<EeHit> OnChange(GameEvent e)
         {
             switch (e.Watch)
             {
+                case MaxisTowerWatch:
+                    maxis = e.NewValue != 0;
+                    break;
+                case BellsWatch:
+                    if (Rose(e) && maxis) yield return new EeHit("bells_levers", e.Clock);
+                    break;
+                case LeversWatch:
+                    if (!maxis && e.OldValue < LeverCount && e.NewValue >= LeverCount) yield return new EeHit("bells_levers", e.Clock);
+                    break;
                 case ChestUsedWatch:
                     if (Rose(e)) yield return new EeHit("boxhit", e.Clock);
                     break;
