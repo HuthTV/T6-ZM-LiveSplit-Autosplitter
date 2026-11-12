@@ -7,34 +7,48 @@ using static LiveSplit.T6ZM.PageParts;
 
 namespace LiveSplit.T6ZM
 {
-    internal sealed class GroupedList : CheckedListBox
+    internal sealed class StepGrid : Panel
     {
+        const int ColumnWidth = 190;
         const int Indent = 16;
+        const int DividerGap = 9;
+        const int Pad = 3;
+        int top;
 
-        public Func<int, bool> IsHeader { get; set; } = _ => false;
-        public bool Grouped { get; set; }
-        public bool BoldHeaders { get; set; } = true;
-
-        protected override void OnDrawItem(System.Windows.Forms.DrawItemEventArgs e)
+        public StepGrid()
         {
-            if (e.Index < 0 || e.Index >= Items.Count) return;
-            bool header = IsHeader(e.Index);
-            bool selected = !header && (e.State & DrawItemState.Selected) != 0;
-            System.Drawing.Color back = selected ? System.Drawing.SystemColors.Highlight : BackColor;
-            System.Drawing.Color fore = selected ? System.Drawing.SystemColors.HighlightText : ForeColor;
-            using (var brush = new System.Drawing.SolidBrush(back)) e.Graphics.FillRectangle(brush, e.Bounds);
-            int x = e.Bounds.X + 2;
-            if (header)
-            {
-                using (var bold = new System.Drawing.Font(Font, BoldHeaders ? System.Drawing.FontStyle.Bold : System.Drawing.FontStyle.Regular))
-                    TextRenderer.DrawText(e.Graphics, Items[e.Index].ToString(), bold, new System.Drawing.Point(x, e.Bounds.Y + 1), fore);
-                return;
-            }
-            if (Grouped) x += Indent;
-            var state = GetItemChecked(e.Index) ? System.Windows.Forms.VisualStyles.CheckBoxState.CheckedNormal : System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal;
-            CheckBoxRenderer.DrawCheckBox(e.Graphics, new System.Drawing.Point(x, e.Bounds.Y + Math.Max(0, (e.Bounds.Height - 13) / 2)), state);
-            TextRenderer.DrawText(e.Graphics, Items[e.Index].ToString(), Font, new System.Drawing.Point(x + 18, e.Bounds.Y + 1), fore);
+            BackColor = System.Drawing.SystemColors.Window;
+            BorderStyle = BorderStyle.Fixed3D;
+            AutoScroll = true;
+            Width = 386;
+            Margin = Padding.Empty;
         }
+
+        public int RowHeight => Math.Max(17, Font.Height + 4);
+
+        public void Reset()
+        {
+            Control[] old = Controls.Cast<Control>().ToArray();
+            Controls.Clear();
+            foreach (Control control in old) control.Dispose();
+            top = Pad;
+        }
+
+        public void Divider()
+        {
+            Controls.Add(new Label { BackColor = System.Drawing.SystemColors.ControlLight, Location = new System.Drawing.Point(Pad, top + DividerGap / 2), Size = new System.Drawing.Size(ClientSize.Width - 2 * Pad, 1) });
+            top += DividerGap;
+        }
+
+        public void Place(Control control, int column, int row, bool indent)
+        {
+            control.Location = new System.Drawing.Point(Pad + column * ColumnWidth + (indent ? Indent : 0), top + row * RowHeight);
+            Controls.Add(control);
+        }
+
+        public void EndSection(int rows) => top += rows * RowHeight;
+
+        public int FitHeight(int rows, int dividers) => rows * RowHeight + dividers * DividerGap + 2 * Pad + (Height - ClientSize.Height);
     }
 
     internal sealed class EasterEggPage : ModePage
@@ -44,9 +58,8 @@ namespace LiveSplit.T6ZM
         readonly ComboBox eeMap = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
         readonly ComboBox eePlayers = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 75 };
         readonly CheckBox pauseRta = new CheckBox { Text = "Pause the real-time clock between maps", AutoSize = true, Margin = new Padding(3, 6, 3, 0) };
-        readonly List<(EeMap map, int step)> eeRows = new List<(EeMap map, int step)>();
         string eeShown;
-        readonly GroupedList eeChecks = new GroupedList { CheckOnClick = true, IntegralHeight = false, Width = 386, Margin = Padding.Empty };
+        readonly StepGrid eeChecks = new StepGrid();
         readonly StepTicks ticks = new StepTicks(honourForced: true);
         bool filling;
 
@@ -55,7 +68,6 @@ namespace LiveSplit.T6ZM
             this.super = super;
             eeMap.Items.AddRange(EeMaps.All.Select(m => (object)m.Name).ToArray());
             eeMap.SelectedIndex = 0;
-            eeChecks.IsHeader = i => i < eeRows.Count && eeRows[i].step < 0;
             eePlayers.Items.AddRange(new object[] { "Solo", "Co-op" });
             eePlayers.SelectedIndex = 0;
             Controls.Add(Row(eeMapCaption, eeMap, Caption("Mode:"), eePlayers));
@@ -65,7 +77,6 @@ namespace LiveSplit.T6ZM
                 Hook(control);
             eeMap.SelectedIndexChanged += (s, e) => FillEe();
             eePlayers.SelectedIndexChanged += (s, e) => FillEe();
-            eeChecks.ItemCheck += OnEeCheck;
             FillEe();
         }
 
@@ -103,62 +114,72 @@ namespace LiveSplit.T6ZM
             if (filling) return;
             bool coop = EeCoop;
             string shown = $"{SuperPage}|{coop}|{eeMap.SelectedIndex}";
-            if (shown == eeShown && eeChecks.Items.Count > 0) return;
+            if (shown == eeShown && eeChecks.Controls.Count > 0) return;
             eeShown = shown;
-            eeRows.Clear();
             filling = true;
-            eeChecks.BeginUpdate();
-            eeChecks.Items.Clear();
-            bool columns = !SuperPage && SelectedEeMap.Branches != null;
-            eeChecks.Grouped = SuperPage || columns;
-            eeChecks.MultiColumn = columns;
-            eeChecks.BoldHeaders = SuperPage;
-            eeChecks.ColumnWidth = 190;
-            foreach (EeMap map in SuperPage ? EeMaps.Super : new[] { SelectedEeMap })
+            eeChecks.SuspendLayout();
+            eeChecks.Reset();
+            (int rows, int dividers) = Lay(Shown(SuperPage), SuperPage, coop, eeChecks);
+            if (SuperPage)
             {
-                foreach (EeMap part in map.Parts)
-                {
-                    if (part.Branch != null || SuperPage)
-                    {
-                        string title = part.Branch == null ? map.Name : (SuperPage ? map.Name + ": " : "") + part.Branch;
-                        eeRows.Add((part, -1));
-                        eeChecks.Items.Add(title, CheckState.Indeterminate);
-                    }
-                    uint mask = EeMask(part, SuperPage, coop);
-                    IReadOnlyList<EeStep> steps = part.List(coop, SuperPage).Steps;
-                    for (int i = 0; i < steps.Count; i++)
-                    {
-                        eeRows.Add((part, i));
-                        eeChecks.Items.Add(steps[i].Label, (mask & (1u << i)) != 0);
-                    }
-                }
+                (int solo, int soloDividers) = Lay(EeMaps.Super, true, false, null);
+                (int duo, int duoDividers) = Lay(EeMaps.Super, true, true, null);
+                eeChecks.Height = Math.Max(eeChecks.FitHeight(solo, soloDividers), eeChecks.FitHeight(duo, duoDividers));
             }
-            int visibleRows = columns ? 9 : Math.Max(eeRows.Count, SuperPage ? Math.Max(SuperRows(false), SuperRows(true)) : 9);
-            eeChecks.Height = eeChecks.ItemHeight * visibleRows + (eeChecks.Height - eeChecks.ClientSize.Height);
-            eeChecks.EndUpdate();
+            else
+                eeChecks.Height = EeMaps.All.SelectMany(m => new[] { false, true }.Select(c => Lay(new[] { m }, false, c, null)))
+                    .Max(size => eeChecks.FitHeight(size.rows, size.dividers));
+            eeChecks.ResumeLayout();
             filling = false;
         }
 
-        static int SuperRows(bool coop) =>
-            EeMaps.Super.Sum(map => map.Parts.Sum(part => 1 + part.List(coop, true).Steps.Count));
+        IEnumerable<EeMap> Shown(bool superPage) => superPage ? EeMaps.Super : new[] { SelectedEeMap };
 
-        void OnEeCheck(object sender, ItemCheckEventArgs e)
+        (int rows, int dividers) Lay(IEnumerable<EeMap> maps, bool superPage, bool coop, StepGrid grid)
         {
-            if (filling || e.Index >= eeRows.Count) return;
-            (EeMap map, int step) = eeRows[e.Index];
-            if (step < 0)
+            int rows = 0, dividers = 0;
+            foreach (EeMap map in maps)
             {
-                e.NewValue = CheckState.Indeterminate;
-                return;
+                if (rows > 0)
+                {
+                    grid?.Divider();
+                    dividers++;
+                }
+                IReadOnlyList<EeMap> parts = map.Parts;
+                bool headed = superPage || parts.Count > 1;
+                int height = 0;
+                for (int column = 0; column < parts.Count; column++)
+                {
+                    EeMap part = parts[column];
+                    StepList<EeStep> list = part.List(coop, superPage);
+                    height = Math.Max(height, list.Steps.Count + (headed ? 1 : 0));
+                    if (grid == null) continue;
+                    if (headed)
+                    {
+                        string title = part.Branch == null ? map.Name : (superPage ? map.Name + ": " : "") + part.Branch;
+                        grid.Place(new Label { Text = title, AutoSize = true, Margin = Padding.Empty, Padding = new Padding(0, 2, 0, 0) }, column, 0, false);
+                    }
+                    uint mask = EeMask(part, superPage, coop);
+                    for (int i = 0; i < list.Steps.Count; i++)
+                        grid.Place(StepBox(list, i, (mask & (1u << i)) != 0), column, i + (headed ? 1 : 0), headed);
+                }
+                grid?.EndSection(height);
+                rows += height;
             }
-            StepList<EeStep> list = map.List(EeCoop, SuperPage);
-            if ((list.Forced & (1u << step)) != 0)
+            return (rows, dividers);
+        }
+
+        CheckBox StepBox(StepList<EeStep> list, int step, bool ticked)
+        {
+            bool forced = (list.Forced & (1u << step)) != 0;
+            var box = new CheckBox { Text = list.Steps[step].Label, AutoSize = true, Checked = ticked || forced, AutoCheck = !forced, Margin = Padding.Empty };
+            box.CheckedChanged += (s, e) =>
             {
-                e.NewValue = CheckState.Checked;
-                return;
-            }
-            ticks.Set(list, step, e.NewValue == CheckState.Checked);
-            OnSettingChanged();
+                if (filling) return;
+                ticks.Set(list, step, box.Checked);
+                OnSettingChanged();
+            };
+            return box;
         }
 
         static IEnumerable<StepList<EeStep>> SavedLists()
