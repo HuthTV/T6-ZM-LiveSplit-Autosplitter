@@ -84,7 +84,7 @@ namespace LiveSplit.T6ZM
             timingsHeldNote.Visible = timingsHeld;
         }
 
-        static int[] Every(int step) => Enumerable.Range(2, LastRound - 1).Where(r => r % step == 0).ToArray();
+        int[] Every(int step) => Enumerable.Range(2, LastRound - 1).Where(r => r % step == 0 || (!unlimited.Checked && r == MaxRound)).ToArray();
 
         void SetRounds(IEnumerable<int> rounds)
         {
