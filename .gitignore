@@ -3,3 +3,4 @@ component/bin/
 component/obj/
 *.user
 .vs/
+livesplit_files/
