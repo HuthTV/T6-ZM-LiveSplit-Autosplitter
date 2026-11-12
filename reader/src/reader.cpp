@@ -723,6 +723,7 @@ constexpr ee_watch ee_transit[] = {
     {5, ee_kind::path, "sq_progress", "rich", "A_jetgun_tower"},
     {7, ee_kind::path, "sq_progress", "rich", "FINISHED"},
     {8, ee_kind::path, "sq_progress", "maxis", "FINISHED"},
+    {15, ee_kind::length, "players", nullptr, nullptr},
 };
 constexpr ee_watch ee_highrise[] = {
     ee_blackscreen,
@@ -732,6 +733,7 @@ constexpr ee_watch ee_highrise[] = {
     {4, ee_kind::player_has, "perk_purchased", nullptr, nullptr},
     {5, ee_kind::player_has, "laststand", nullptr, nullptr},
     {7, ee_kind::player_has, "revivetrigger", nullptr, nullptr},
+    {15, ee_kind::length, "players", nullptr, nullptr},
 };
 constexpr ee_watch ee_prison[] = {
     ee_blackscreen,
@@ -743,6 +745,7 @@ constexpr ee_watch ee_prison[] = {
     {7, ee_kind::length, "a_important_codes", nullptr, nullptr},
     {8, ee_kind::entity, "m_headphones", nullptr, nullptr},
     {9, ee_kind::defined, "winner", nullptr, nullptr},
+    {15, ee_kind::length, "players", nullptr, nullptr},
 };
 constexpr ee_watch ee_buried[] = {
     ee_blackscreen,
@@ -757,6 +760,7 @@ constexpr ee_watch ee_buried[] = {
     {12, ee_kind::flag, "sq_is_max_tower_built", nullptr, nullptr},
     {13, ee_kind::flag, "sq_ip_puzzle_complete", nullptr, nullptr},
     {14, ee_kind::field, "sq_ml_curr_lever", nullptr, nullptr},
+    {15, ee_kind::length, "players", nullptr, nullptr},
 };
 constexpr ee_watch ee_tomb[] = {
     ee_blackscreen,
@@ -767,6 +771,7 @@ constexpr ee_watch ee_tomb[] = {
     {5, ee_kind::flag, "ee_mech_zombie_hole_opened", nullptr, nullptr},
     {7, ee_kind::flag, "ee_samantha_released", nullptr, nullptr},
     {8, ee_kind::field, "intermission", nullptr, nullptr},
+    {15, ee_kind::length, "players", nullptr, nullptr},
 };
 constexpr ee_map_def ee_maps[] = {
     {"zm_transit", ee_transit, static_cast<std::uint32_t>(std::size(ee_transit)), 0},

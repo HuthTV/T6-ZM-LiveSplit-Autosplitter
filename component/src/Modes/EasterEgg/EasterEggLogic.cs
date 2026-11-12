@@ -20,6 +20,7 @@ namespace LiveSplit.T6ZM
     {
         const string TransitScript = "zm_transit";
         const int ClassicWatch = 1;
+        public const int PlayersWatch = 15;
         const int SuperMaps = 3;
 
         readonly bool super;
@@ -30,6 +31,7 @@ namespace LiveSplit.T6ZM
 
         string map = "";
         bool classic = true;
+        int playerCount;
         EeDetector detector;
         uint resetGeneration = uint.MaxValue;
         uint classicGeneration = uint.MaxValue;
@@ -60,6 +62,8 @@ namespace LiveSplit.T6ZM
             {
                 if (map == TransitScript && !classic) return "only classic TranZit is timed";
                 if (super && map != TransitScript) return "load TranZit to start a Super run";
+                if (playerCount > 1 && !coop()) return "not a solo game (Mode: Solo)";
+                if (playerCount == 1 && coop()) return "waiting for more players (Mode: Co-op)";
                 return null;
             }
         }
@@ -68,6 +72,7 @@ namespace LiveSplit.T6ZM
         {
             if (s.Status < ReaderStatus.Resolving) return false;
             if (!string.IsNullOrEmpty(s.Map)) map = s.Map;
+            if (s.Known(PlayersWatch)) playerCount = s.Values[PlayersWatch];
             if (map != TransitScript) classic = true;
             else if (s.Known(ClassicWatch))
             {
@@ -102,8 +107,11 @@ namespace LiveSplit.T6ZM
             detector = null;
         }
 
+        bool PlayersMatch => playerCount == 0 || (playerCount > 1) == coop();
+
         protected override void OnNewLevel()
         {
+            playerCount = 0;
             if (super && attempt)
             {
                 carry = lastGame;
@@ -143,7 +151,7 @@ namespace LiveSplit.T6ZM
             {
                 if (!running)
                 {
-                    if (BlackscreenEnded(e) && SupportsMap(map) && classic) yield return StartRun(e.Clock);
+                    if (BlackscreenEnded(e) && SupportsMap(map) && classic && PlayersMatch) yield return StartRun(e.Clock);
                     yield break;
                 }
                 foreach (TimerAction action in Handle(e)) yield return action;
@@ -153,7 +161,7 @@ namespace LiveSplit.T6ZM
             if (e.Watch == BlackscreenWatch && Became(e, BlackscreenWatch))
             {
                 int index = SuperIndex(map);
-                if (index == 0 && classic)
+                if (index == 0 && classic && PlayersMatch)
                 {
                     ResetChain();
                     Begin(e, 0);

@@ -33,7 +33,7 @@ enum t6r_profile {
 //   buried   turbine headchopper subwoofer sq_common springpad tower oillamp tpo_switch
 //   prison   shield plane packasplat
 //   tomb     drone shield staff_fire staff_air staff_lightning staff_water
-// easter egg
+// easter egg (all maps 15 players)
 //   transit  1 zclassic 2 power_on 3 power_event_in_progress 4 A_jetgun_built 5 A_jetgun_tower 7 rich FINISHED 8 maxis FINISHED
 //   highrise 1 sq_atd_drg_puzzle_complete 2 sq_tower_active 3 num_perks 4 perk_purchased 5 laststand 7 revivetrigger 8 orb
 //   prison   1 dryer_cycle_active 2 gondola_initialized 3 gondola_in_motion 4 plane_boarded 5 nixie_ee_flashing 7 a_important_codes 8 m_headphones 9 winner
