@@ -7,7 +7,7 @@
 #define T6R_API extern "C" __declspec(dllimport)
 #endif
 
-#define T6R_API_VERSION 7
+#define T6R_API_VERSION 8
 #define T6R_MAX_WATCHES 16
 
 enum t6r_status {
@@ -53,6 +53,9 @@ typedef struct t6r_sample {
     uint32_t process_id;
     uint32_t level_id;
     uint32_t clock_dips;
+    uint32_t velocity_known;
+    float velocity[3];
+    float frame_ms;
 } t6r_sample;
 #pragma pack(pop)
 

@@ -23,6 +23,9 @@ namespace LiveSplit.T6ZM
         public uint ProcessId;
         public uint LevelId;
         public uint ClockDips;
+        public uint VelocityKnown;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)] public float[] Velocity;
+        public float FrameMs;
 
         public bool Known(int watch) => (WatchKnown & (1u << watch)) != 0;
     }
@@ -30,7 +33,7 @@ namespace LiveSplit.T6ZM
     internal static class Reader
     {
         const string Dll = "t6zm_reader.dll";
-        const int ApiVersion = 7;
+        const int ApiVersion = 8;
 
         static Reader()
         {

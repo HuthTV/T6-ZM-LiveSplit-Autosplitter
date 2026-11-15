@@ -10,6 +10,9 @@ namespace LiveSplit.T6ZM
     {
         readonly ComboBox category = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
         readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
+        readonly CheckBox showVelocity = new CheckBox { Text = "Show host player velocity", AutoSize = true };
+        readonly CheckBox velocityDecimals = new CheckBox { Text = "Decimals", AutoSize = true, Enabled = false };
+        readonly CheckBox showFps = new CheckBox { Text = "Show FPS", AutoSize = true };
         readonly Label blocked = new Label { Text = "Some settings locked while timer is running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
         readonly Label description = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(424, 0), ForeColor = System.Drawing.SystemColors.ControlText, Font = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9f), Margin = Padding.Empty };
         readonly Panel descriptionBox = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = System.Drawing.SystemColors.ControlLight, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(6), Margin = new Padding(3, 2, 3, 8), MinimumSize = new System.Drawing.Size(436, 0) };
@@ -34,11 +37,16 @@ namespace LiveSplit.T6ZM
                 layout.Controls.Add(page);
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
             layout.Controls.Add(showInfo);
+            layout.Controls.Add(Row(showVelocity, velocityDecimals));
+            layout.Controls.Add(showFps);
             Controls.Add(layout);
             AutoSize = true;
 
             category.SelectedIndexChanged += (s, e) => Changed();
             showInfo.CheckedChanged += (s, e) => Changed();
+            showVelocity.CheckedChanged += (s, e) => { velocityDecimals.Enabled = showVelocity.Checked; Changed(); };
+            velocityDecimals.CheckedChanged += (s, e) => Changed();
+            showFps.CheckedChanged += (s, e) => Changed();
             foreach (ModePage page in pages)
             {
                 page.SettingChanged += Changed;
@@ -76,6 +84,9 @@ namespace LiveSplit.T6ZM
         }
 
         public bool ShowInfo => showInfo.Checked;
+        public bool ShowVelocity => showVelocity.Checked;
+        public bool VelocityDecimals => velocityDecimals.Checked;
+        public bool ShowFps => showFps.Checked;
         public Category Category => (Category)Math.Max(0, category.SelectedIndex);
 
         Mode Mode => Modes.Of(Category);
@@ -131,6 +142,9 @@ namespace LiveSplit.T6ZM
             foreach (ModePage page in pages)
                 page.WriteXml(document, node);
             node.AppendChild(Element(document, "ShowInfo", showInfo.Checked.ToString()));
+            node.AppendChild(Element(document, "ShowVelocity", showVelocity.Checked.ToString()));
+            node.AppendChild(Element(document, "VelocityDecimals", velocityDecimals.Checked.ToString()));
+            node.AppendChild(Element(document, "ShowFps", showFps.Checked.ToString()));
             return node;
         }
 
@@ -143,6 +157,9 @@ namespace LiveSplit.T6ZM
                 foreach (ModePage page in pages)
                     page.ReadXml(node);
                 showInfo.Checked = ReadBool(node, "ShowInfo", true);
+                showVelocity.Checked = ReadBool(node, "ShowVelocity", false);
+                velocityDecimals.Checked = ReadBool(node, "VelocityDecimals", false);
+                showFps.Checked = ReadBool(node, "ShowFps", false);
             }
             finally
             {

@@ -32,16 +32,21 @@ struct build_def {
     bool strings_indirect;
     address_t engine_time = 0;
     address_t entities = 0, entity_count = 0, entity_base = 0;
+    address_t clients = 0;
+    std::uint32_t entity_client = 0x154;
+    address_t frame_ms = 0;
 };
 
 constexpr build_def builds[] = {
     {L"plutonium-bootstrapper-win32.exe", t6r::fingerprint::plutonium::regions, std::size(t6r::fingerprint::plutonium::regions), 4,
      0x2DEA810, 0x2DEA81C, 0x2DEA400, 0x2DEA480, 0x2DEA580, 0x2BF2DA4, true, 0x5466C8, 0x51A9A3, true, 0x2338F18,
-     0x2338784, 0x233878C, 0x21C13C0},
+     0x2338784, 0x233878C, 0x21C13C0, 0x2338780, 0x154, 0x11172E4},
     {L"t6zm.exe", t6r::fingerprint::steam::regions, std::size(t6r::fingerprint::steam::regions), 4,
-     0x2D3A910, 0x2D3A91C, 0x2D3A500, 0x2D3A580, 0x2D3A680, 0x2B42EA4, true, 0x7E1180, 0x7E115B, true},
+     0x2D3A910, 0x2D3A91C, 0x2D3A500, 0x2D3A580, 0x2D3A680, 0x2B42EA4, true, 0x7E1180, 0x7E115B, true, 0,
+     0, 0, 0x210F640, 0x2286A00},
     {L"t6zm.exe", t6r::fingerprint::store::regions, std::size(t6r::fingerprint::store::regions), 8,
-     0x14249191C, 0x142491928, 0x142491500, 0x142491580, 0x142491680, 0x142283580, false, 0x142416E00, 0x34BC, false},
+     0x14249191C, 0x142491928, 0x142491500, 0x142491580, 0x142491680, 0x142283580, false, 0x142416E00, 0x34BC, false, 0,
+     0, 0, 0x141D20930, 0x141D16180, 0x158},
 };
 
 constexpr std::uint32_t object_limit = 0x8000;
@@ -1021,6 +1026,21 @@ bool orb_at_start(const std::uint8_t* entity) {
     return false;
 }
 
+constexpr std::uint32_t client_velocity = 0x34;
+constexpr float frame_ms_limit = 1000.0f;
+
+void read_frame(t6r_sample& out) {
+    float ms = 0;
+    if (g.build->frame_ms && read(g.build->frame_ms, &ms, sizeof(ms)) && ms > 0 && ms < frame_ms_limit) out.frame_ms = ms;
+}
+
+void read_velocity(t6r_sample& out) {
+    address_t client = 0, first = 0;
+    if (!g.build->clients || !g.build->entity_base) return;
+    if (!pointer(g.build->entity_base + g.build->entity_client, client) || client == 0 || !pointer(g.build->clients, first) || client != first) return;
+    if (read(client + client_velocity, out.velocity, sizeof(out.velocity))) out.velocity_known = 1;
+}
+
 void read_orb(t6r_sample& out) {
     orb_track& orb = ee.orb;
     std::uint32_t count = 0;
@@ -1126,6 +1146,7 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         g.profile = profile;
         forget_level();
     }
+    read_frame(*out);
 
     for (int attempt = 0; attempt < sample_attempts; ++attempt) {
         out->status = T6R_NO_LEVEL;
@@ -1175,6 +1196,8 @@ T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
         if (g.complete && select_player_fields()) track_players(*out);
         if (g.complete && profiles[g.profile].built_set) read_set(*out, built_value);
         if (g.complete && profiles[g.profile].ee) read_ee(*out);
+        out->velocity_known = 0;
+        read_velocity(*out);
         if (!u32(g.build->vm_clock, clock_after)) continue;
         if (timed && (!u32(g.build->engine_time, time_after) || time_after != time)) {
             ++out->retries;

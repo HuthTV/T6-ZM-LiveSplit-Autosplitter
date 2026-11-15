@@ -22,6 +22,7 @@ namespace LiveSplit.T6ZM
         readonly Queue<TimerAction> pending = new Queue<TimerAction>();
         readonly InfoTextComponent statusRow = new InfoTextComponent("T6ZM", "");
         readonly InfoTextComponent nextRow = new InfoTextComponent("Next", "");
+        readonly InfoTextComponent motionRow = new InfoTextComponent("Velocity", "");
 
         RunLogic logic;
         bool timingMethodSet;
@@ -66,7 +67,14 @@ namespace LiveSplit.T6ZM
         void OnManualUndo(object sender, EventArgs e) => ManualUndo();
         void OnFormClosing(object sender, FormClosingEventArgs e) => closingUntil = DateTime.UtcNow.AddSeconds(60);
 
-        IEnumerable<InfoTextComponent> Rows => settings.ShowInfo ? new[] { statusRow, nextRow } : Array.Empty<InfoTextComponent>();
+        IEnumerable<InfoTextComponent> Rows
+        {
+            get
+            {
+                if (settings.ShowInfo) { yield return statusRow; yield return nextRow; }
+                if (settings.ShowVelocity || settings.ShowFps) yield return motionRow;
+            }
+        }
 
         public string ComponentName => "T6 Zombies Autosplitter";
         public float HorizontalWidth => Rows.Sum(r => r.HorizontalWidth);
@@ -212,6 +220,7 @@ namespace LiveSplit.T6ZM
             statusRow.InformationName = StatusName(sample);
             statusRow.InformationValue = Status(sample);
             nextRow.InformationValue = Next();
+            UpdateMotion(sample);
             foreach (InfoTextComponent row in Rows) row.Update(invalidator, state, width, height, mode);
         }
 
@@ -403,6 +412,31 @@ namespace LiveSplit.T6ZM
                     string detail = logic.StatusDetail(s) is string text ? text + ", " : "";
                     return $"{Map(s)} {detail}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
             }
+        }
+
+        void UpdateMotion(ReaderSample s)
+        {
+            string velocity = Velocity(s, settings.VelocityDecimals), fps = Fps(s);
+            if (settings.ShowVelocity && settings.ShowFps)
+            {
+                motionRow.InformationName = "Velocity " + velocity;
+                motionRow.InformationValue = "FPS " + fps;
+            }
+            else
+            {
+                motionRow.InformationName = settings.ShowFps ? "FPS" : "Velocity";
+                motionRow.InformationValue = settings.ShowFps ? fps : velocity;
+            }
+        }
+
+        static string Fps(ReaderSample s) =>
+            s.FrameMs > 0 ? Math.Round(1000.0 / s.FrameMs).ToString("0", System.Globalization.CultureInfo.InvariantCulture) : "-";
+
+        static string Velocity(ReaderSample s, bool decimals)
+        {
+            if (s.VelocityKnown == 0 || s.Velocity == null) return "-";
+            double speed = Math.Sqrt(s.Velocity[0] * s.Velocity[0] + s.Velocity[1] * s.Velocity[1]);
+            return speed.ToString(decimals ? "0.00" : "0", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         static string Map(ReaderSample s) => GameMaps.Name(s.Map);
