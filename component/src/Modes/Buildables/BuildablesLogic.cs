@@ -41,7 +41,7 @@ namespace LiveSplit.T6ZM
             if (e.Watch == MaskWatch) built |= (uint)(e.OldValue | e.NewValue);
             if (!running)
             {
-                if (BlackscreenEnded(e)) yield return StartRun(e.Clock);
+                if (BlackscreenEnded(e) && current != null) yield return StartRun(e.Clock);
                 yield break;
             }
             if (e.Watch != MaskWatch || current == null) yield break;

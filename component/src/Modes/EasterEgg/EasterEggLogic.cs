@@ -203,10 +203,13 @@ namespace LiveSplit.T6ZM
                 uint mask = Mask(part, players);
                 int index = list.IndexOf(hit.Id);
                 bool complete = steps.Count > 0 && steps[steps.Count - 1].Id == hit.Id;
-                if (!done.Add(map + ":" + hit.Id)) continue;
-                if (index < 0) continue;
-                if ((mask & (1u << index)) != 0)
-                    yield return new TimerAction(ActionKind.Split, hit.Tick, steps[index].Label, 0);
+                if (index < 0 || done.Contains(map + ":" + hit.Id)) continue;
+                for (int i = 0; i <= index; i++)
+                {
+                    if (!done.Add(map + ":" + steps[i].Id)) continue;
+                    if ((mask & (1u << i)) != 0)
+                        yield return new TimerAction(ActionKind.Split, hit.Tick, steps[i].Label, 0);
+                }
                 if (!complete) continue;
 
                 if (!super) continue;

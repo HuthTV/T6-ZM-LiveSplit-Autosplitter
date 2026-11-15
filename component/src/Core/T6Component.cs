@@ -167,7 +167,7 @@ namespace LiveSplit.T6ZM
                 {
                     switch (action.Kind)
                     {
-                        case ActionKind.Start: Start(action, e.Generation); break;
+                        case ActionKind.Start: if (CanStart(sample)) Start(action, e.Generation); break;
                         case ActionKind.Rebase: Rebase(action, e.Generation); break;
                         default:
                             if (action.Kind == ActionKind.Split && e.Window > 1) uncertain = $"{action.Label} ({e.Window} ticks)";
@@ -179,7 +179,7 @@ namespace LiveSplit.T6ZM
 
             if (state.CurrentPhase == TimerPhase.NotRunning && logic.PendingStart is uint due
                 && sample.Generation == logic.PendingGeneration && sample.Status >= ReaderStatus.Resolving && sample.Clock >= due
-                && !(sample.Known(RunLogic.BlackscreenWatch) && sample.Values[RunLogic.BlackscreenWatch] != 0))
+                && !(sample.Known(RunLogic.BlackscreenWatch) && sample.Values[RunLogic.BlackscreenWatch] != 0) && CanStart(sample))
                 Start(logic.StartRun(due), sample.Generation);
 
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
@@ -223,6 +223,9 @@ namespace LiveSplit.T6ZM
             UpdateMotion(sample);
             foreach (InfoTextComponent row in Rows) row.Update(invalidator, state, width, height, mode);
         }
+
+        bool CanStart(ReaderSample sample) =>
+            (string.IsNullOrEmpty(sample.Map) || logic.SupportsMap(sample.Map)) && logic.StartBlocked == null;
 
         void Start(TimerAction action, uint generation)
         {
