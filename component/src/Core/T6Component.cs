@@ -152,12 +152,12 @@ namespace LiveSplit.T6ZM
             settings.GameMap = sample.Status >= ReaderStatus.Resolving ? sample.Map : null;
             if (saved != null && state.CurrentPhase == TimerPhase.NotRunning && !startClock.HasValue) TryResume(sample);
             Housekeeping();
-            if (logic.OnSample(sample) && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
+            if (logic.OnSample(sample) && state.CurrentPhase != TimerPhase.NotRunning && settings.AutoReset) timer.Reset();
             while (watcher.Events.TryDequeue(out GameEvent e))
             {
                 if (e.Kind == GameEventKind.NewLevel)
                 {
-                    if (!logic.Continues && state.CurrentPhase != TimerPhase.NotRunning) timer.Reset();
+                    if (!logic.Continues && state.CurrentPhase != TimerPhase.NotRunning && settings.AutoReset) timer.Reset();
                     pending.Clear();
                     logic.NewLevel();
                     continue;
@@ -192,15 +192,8 @@ namespace LiveSplit.T6ZM
                     SaveRun(sample);
                     break;
                 }
-                if (next.Kind == ActionKind.Skip)
-                {
-                    madeSplits.Add(new SavedSplit { Label = "(skipped)" });
-                    ownSplit = true;
-                    try { timer.SkipSplit(); } finally { ownSplit = false; }
-                    SaveRun(sample);
-                    continue;
-                }
                 state.SetGameTime(Ticks(baseTicks + next.Tick - startClock.Value));
+                if (!settings.AutoSplit) continue;
                 int index = state.CurrentSplitIndex;
                 ownSplit = true;
                 try { timer.Split(); } finally { ownSplit = false; }
@@ -229,9 +222,10 @@ namespace LiveSplit.T6ZM
 
         void Start(TimerAction action, uint generation)
         {
+            if (!settings.AutoStart) return;
             if (state.CurrentPhase != TimerPhase.NotRunning)
             {
-                if (!logic.Continues) return;
+                if (!logic.Continues || !settings.AutoReset) return;
                 restarting = true;
                 try { timer.Reset(); } finally { restarting = false; }
             }

@@ -10,6 +10,9 @@ namespace LiveSplit.T6ZM
     {
         readonly ComboBox category = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
         readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
+        readonly CheckBox autoStart = new CheckBox { Text = "Start", Checked = true, AutoSize = true };
+        readonly CheckBox autoSplit = new CheckBox { Text = "Split", Checked = true, AutoSize = true };
+        readonly CheckBox autoReset = new CheckBox { Text = "Reset", Checked = true, AutoSize = true };
         readonly CheckBox showVelocity = new CheckBox { Text = "Show host player velocity", AutoSize = true };
         readonly CheckBox velocityDecimals = new CheckBox { Text = "Decimals", AutoSize = true, Enabled = false };
         readonly CheckBox showFps = new CheckBox { Text = "Show FPS", AutoSize = true };
@@ -28,8 +31,13 @@ namespace LiveSplit.T6ZM
             pages = Modes.CreatePages(() => Category == Category.SuperEasterEgg);
 
             var layout = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+            var bold = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9.5f, System.Drawing.FontStyle.Bold);
+            Label controlCaption = Caption("Autosplitter:");
+            controlCaption.Font = bold;
+            layout.Controls.Add(Row(controlCaption, autoStart, autoSplit, autoReset));
+            layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
             Label categoryCaption = Caption("Category:");
-            categoryCaption.Font = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9.5f, System.Drawing.FontStyle.Bold);
+            categoryCaption.Font = bold;
             layout.Controls.Add(Row(categoryCaption, category, blocked));
             descriptionBox.Controls.Add(description);
             layout.Controls.Add(descriptionBox);
@@ -44,6 +52,7 @@ namespace LiveSplit.T6ZM
 
             category.SelectedIndexChanged += (s, e) => Changed();
             showInfo.CheckedChanged += (s, e) => Changed();
+            foreach (CheckBox box in new[] { autoStart, autoSplit, autoReset }) box.CheckedChanged += (s, e) => Changed();
             showVelocity.CheckedChanged += (s, e) => { velocityDecimals.Enabled = showVelocity.Checked; Changed(); };
             velocityDecimals.CheckedChanged += (s, e) => Changed();
             showFps.CheckedChanged += (s, e) => Changed();
@@ -84,6 +93,9 @@ namespace LiveSplit.T6ZM
         }
 
         public bool ShowInfo => showInfo.Checked;
+        public bool AutoStart => autoStart.Checked;
+        public bool AutoSplit => autoSplit.Checked;
+        public bool AutoReset => autoReset.Checked;
         public bool ShowVelocity => showVelocity.Checked;
         public bool VelocityDecimals => velocityDecimals.Checked;
         public bool ShowFps => showFps.Checked;
@@ -141,6 +153,9 @@ namespace LiveSplit.T6ZM
             node.AppendChild(Element(document, "Category", Category.ToString()));
             foreach (ModePage page in pages)
                 page.WriteXml(document, node);
+            node.AppendChild(Element(document, "AutoStart", autoStart.Checked.ToString()));
+            node.AppendChild(Element(document, "AutoSplit", autoSplit.Checked.ToString()));
+            node.AppendChild(Element(document, "AutoReset", autoReset.Checked.ToString()));
             node.AppendChild(Element(document, "ShowInfo", showInfo.Checked.ToString()));
             node.AppendChild(Element(document, "ShowVelocity", showVelocity.Checked.ToString()));
             node.AppendChild(Element(document, "VelocityDecimals", velocityDecimals.Checked.ToString()));
@@ -156,6 +171,9 @@ namespace LiveSplit.T6ZM
                 if (Enum.TryParse(node?["Category"]?.InnerText, out Category saved)) category.SelectedIndex = (int)saved;
                 foreach (ModePage page in pages)
                     page.ReadXml(node);
+                autoStart.Checked = ReadBool(node, "AutoStart", true);
+                autoSplit.Checked = ReadBool(node, "AutoSplit", true);
+                autoReset.Checked = ReadBool(node, "AutoReset", true);
                 showInfo.Checked = ReadBool(node, "ShowInfo", true);
                 showVelocity.Checked = ReadBool(node, "ShowVelocity", false);
                 velocityDecimals.Checked = ReadBool(node, "VelocityDecimals", false);
