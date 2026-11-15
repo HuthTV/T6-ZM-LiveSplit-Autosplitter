@@ -60,10 +60,10 @@ namespace LiveSplit.T6ZM
         {
             get
             {
-                if (map == TransitScript && !classic) return "only classic TranZit is timed";
-                if (super && map != TransitScript) return "load TranZit to start a Super run";
-                if (playerCount > 1 && !coop()) return "not a solo game (Mode: Solo)";
-                if (playerCount == 1 && coop()) return "waiting for more players (Mode: Co-op)";
+                if (map == TransitScript && !classic) return "classic mode required";
+                if (super && map != TransitScript) return "waiting for TranZit";
+                if (playerCount > 1 && !coop()) return "waiting for solo game";
+                if (playerCount == 1 && coop()) return "waiting for co-op players";
                 return null;
             }
         }
@@ -125,6 +125,8 @@ namespace LiveSplit.T6ZM
             done.Clear();
             if (!super) detector = EeDetector.Create(map);
         }
+
+        static readonly string[] SuperScripts = { TransitScript, "zm_highrise", "zm_buried" };
 
         static int SuperIndex(string script)
         {
@@ -220,8 +222,10 @@ namespace LiveSplit.T6ZM
         {
             get
             {
+                if (super && !attempt && completed > 0 && completed < SuperMaps && SuperIndex(map) != completed)
+                    return $"waiting for {GameMaps.Name(SuperScripts[completed])}";
                 EeMap eeMap = EeMaps.For(map, super);
-                if (eeMap == null) return super && completed >= SuperMaps ? "done" : "map not supported";
+                if (eeMap == null) return super && completed >= SuperMaps ? "done" : $"{GameMaps.Name(map)} unsupported";
                 bool players = coop();
                 EeMap part = Part(eeMap);
                 uint mask = Mask(part, players);

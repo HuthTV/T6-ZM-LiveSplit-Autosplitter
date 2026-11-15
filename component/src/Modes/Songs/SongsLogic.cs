@@ -21,7 +21,6 @@ namespace LiveSplit.T6ZM
         readonly int[] peak = new int[10];
         string map = "";
         uint done;
-        string last;
         uint? musicRise, nixieRise;
         uint? meteorSongClock;
         bool mannequinsDone, comingHome;
@@ -51,7 +50,6 @@ namespace LiveSplit.T6ZM
         {
             Array.Clear(peak, 0, peak.Length);
             done = 0;
-            last = null;
             musicRise = nixieRise = meteorSongClock = null;
             mannequinsDone = comingHome = false;
         }
@@ -96,7 +94,6 @@ namespace LiveSplit.T6ZM
             if ((done & bit) != 0) return false;
             done |= bit;
             if ((pick & bit) == 0) return false;
-            last = current.Steps[index].Label;
             return true;
         }
 
@@ -134,9 +131,15 @@ namespace LiveSplit.T6ZM
             {
                 SongMap current = song;
                 uint pick = chosen(song.Key) & current.Every;
-                int total = Enumerable.Range(0, current.Steps.Count).Count(i => (pick & (1u << i)) != 0);
-                int split = Enumerable.Range(0, current.Steps.Count).Count(i => (pick & done & (1u << i)) != 0);
-                return last == null ? $"{total} song steps" : $"{split} of {total} song steps, last: {last}";
+                for (int i = 0; i < current.Steps.Count; i++)
+                {
+                    if ((pick & (1u << i)) == 0 || (done & (1u << i)) != 0) continue;
+                    SongStep step = current.Steps[i];
+                    if (step.Items != null) return $"{Math.Min(peak[step.Watch], 3)} of 3 {step.Items}";
+                    if (step.Watch == RoundWatch) return "end of round " + (step.Level - 1);
+                    return step.Label;
+                }
+                return "done";
             }
         }
     }

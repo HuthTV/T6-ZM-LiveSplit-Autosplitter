@@ -7,7 +7,6 @@
 #define T6R_API extern "C" __declspec(dllimport)
 #endif
 
-#define T6R_API_VERSION 8
 #define T6R_MAX_WATCHES 16
 
 enum t6r_status {
@@ -59,6 +58,5 @@ typedef struct t6r_sample {
 } t6r_sample;
 #pragma pack(pop)
 
-T6R_API int t6r_api_version(void);
 T6R_API void t6r_poll(uint32_t profile, t6r_sample* out);
 T6R_API void t6r_close(void);

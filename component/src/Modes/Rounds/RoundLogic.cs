@@ -278,7 +278,7 @@ namespace LiveSplit.T6ZM
         {
             get
             {
-                if (!(NextMilestone is int round)) return highRound ? "unlimited: no more splits" : "done";
+                if (!(NextMilestone is int round)) return highRound ? "no more splits" : "done";
                 return $"round {round} ({ModeName(ModeOf(round))})";
             }
         }

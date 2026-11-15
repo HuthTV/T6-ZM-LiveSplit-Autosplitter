@@ -1128,8 +1128,6 @@ void read_watches(t6r_sample& out) {
 
 }
 
-T6R_API int t6r_api_version(void) { return T6R_API_VERSION; }
-
 T6R_API void t6r_poll(uint32_t profile, t6r_sample* out) {
     if (!out) return;
     exclusive guard;

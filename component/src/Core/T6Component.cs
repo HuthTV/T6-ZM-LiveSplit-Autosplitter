@@ -376,27 +376,20 @@ namespace LiveSplit.T6ZM
 
         static TimeSpan Ticks(uint ticks) => TimeSpan.FromTicks(Tick.Ticks * ticks);
 
-        string StatusName(ReaderSample s) => s.Status == ReaderStatus.NoProcess ? "waiting for game process" : ExeName(s.ProcessId);
+        string StatusName(ReaderSample s) => s.Status == ReaderStatus.NoProcess ? "T6ZM" : BuildName(s.ProcessId);
 
-        string exeName = "";
-        uint exeProcess;
+        string buildName = "";
+        uint buildProcess;
 
-        string ExeName(uint processId)
+        string BuildName(uint processId)
         {
-            if (processId == 0) return "game";
-            if (processId != exeProcess)
+            if (processId == 0) return "T6ZM";
+            if (processId != buildProcess)
             {
-                exeProcess = processId;
-                try
-                {
-                    using (Process process = Process.GetProcessById((int)processId)) exeName = process.ProcessName + ".exe";
-                }
-                catch (Exception)
-                {
-                    exeName = "game";
-                }
+                buildProcess = processId;
+                buildName = GameBuild.Name(processId);
             }
-            return exeName;
+            return buildName;
         }
 
         string Status(ReaderSample s)
@@ -404,10 +397,10 @@ namespace LiveSplit.T6ZM
             if (watcher.Error != null) return "reader error: " + watcher.Error;
             switch (s.Status)
             {
-                case ReaderStatus.NoProcess: return "";
-                case ReaderStatus.Unsupported: return "unsupported game build";
+                case ReaderStatus.NoProcess: return "waiting for game";
+                case ReaderStatus.Unsupported: return "unsupported build";
                 case ReaderStatus.NoLevel: return Running ? "waiting for map, game time paused" : "waiting for map";
-                case ReaderStatus.Resolving: return $"{Map(s)} resolving";
+                case ReaderStatus.Resolving: return $"{Map(s)} loading";
                 default:
                     string detail = logic.StatusDetail(s) is string text ? text + ", " : "";
                     return $"{Map(s)} {detail}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
@@ -448,14 +441,14 @@ namespace LiveSplit.T6ZM
                 case TimerPhase.NotRunning:
                     ReaderSample latest = watcher.Latest;
                     if (latest.Status >= ReaderStatus.Resolving && !string.IsNullOrEmpty(latest.Map) && !logic.SupportsMap(latest.Map))
-                        return $"waiting for start: {GameMaps.Name(latest.Map)} not supported";
+                        return $"{GameMaps.Name(latest.Map)} unsupported";
                     if (latest.Status >= ReaderStatus.Resolving && logic.StartBlocked is string blocked)
-                        return $"waiting for start: {blocked}";
-                    if (latest.Status >= ReaderStatus.Ready && latest.Known(RunLogic.BlackscreenWatch) && latest.Values[RunLogic.BlackscreenWatch] != 0) return "waiting on map restart";
-                    return "start: player control";
+                        return blocked;
+                    if (latest.Status >= ReaderStatus.Ready && latest.Known(RunLogic.BlackscreenWatch) && latest.Values[RunLogic.BlackscreenWatch] != 0) return "waiting for restart";
+                    return "waiting for player control";
                 case TimerPhase.Running:
                 case TimerPhase.Paused:
-                    if (!startClock.HasValue) return "started manually, no game time";
+                    if (!startClock.HasValue) return "manual start, no game time";
                     return pending.Count > 0 ? logic.NextWaiting(pending.Peek()) : logic.Next;
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }

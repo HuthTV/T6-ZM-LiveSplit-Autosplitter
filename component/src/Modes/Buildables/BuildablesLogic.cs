@@ -66,10 +66,10 @@ namespace LiveSplit.T6ZM
             get
             {
                 BuildableMap current = BuildableMaps.For(map);
-                if (current == null) return "map not supported";
+                if (current == null) return string.IsNullOrEmpty(map) ? "waiting for map" : $"{GameMaps.Name(map)} unsupported";
                 int total = Count(current.Required);
-                int left = total - Count(built & current.Required);
-                return left == 0 ? "done" : $"{left} of {total} buildables to go";
+                int have = Count(built & current.Required);
+                return have == total ? "done" : $"{have} of {total} built";
             }
         }
 

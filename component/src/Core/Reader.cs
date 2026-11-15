@@ -33,7 +33,6 @@ namespace LiveSplit.T6ZM
     internal static class Reader
     {
         const string Dll = "t6zm_reader.dll";
-        const int ApiVersion = 8;
 
         static Reader()
         {
@@ -65,8 +64,6 @@ namespace LiveSplit.T6ZM
             }
             if (LoadLibrary(path) == IntPtr.Zero)
                 throw new DllNotFoundException($"Could not load {path} (error {Marshal.GetLastWin32Error()}).");
-            if (t6r_api_version() != ApiVersion)
-                throw new InvalidOperationException("t6zm_reader.dll does not match this component version.");
             RemoveOldVersions(Path.GetDirectoryName(folder), hash);
         }
 
@@ -91,7 +88,6 @@ namespace LiveSplit.T6ZM
         public static void Close() => t6r_close();
 
         [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibrary(string path);
-        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] static extern int t6r_api_version();
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] static extern void t6r_poll(uint profile, out ReaderSample sample);
         [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] static extern void t6r_close();
     }

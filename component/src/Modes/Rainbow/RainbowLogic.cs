@@ -34,7 +34,7 @@ namespace LiveSplit.T6ZM
 
         public override bool SupportsMap(string script) => RainbowMaps.For(script) != null;
 
-        public override string StartBlocked => players > 1 ? "solo only" : null;
+        public override string StartBlocked => players > 1 ? "waiting for solo game" : null;
 
         protected override void Reset()
         {
@@ -74,11 +74,19 @@ namespace LiveSplit.T6ZM
             get
             {
                 StepList<RainbowStep> current = RainbowMaps.For(map);
-                if (current == null) return "map not supported";
-                if (players != 1) return "solo only";
+                if (current == null) return string.IsNullOrEmpty(map) ? "waiting for map" : $"{GameMaps.Name(map)} unsupported";
+                if (players != 1) return "waiting for solo game";
                 if (done) return "done";
                 RainbowStep last = current.Steps[current.Steps.Count - 1];
-                return $"{last.Label}: {Math.Max(0, last.Level - peak[last.Watch])} to go";
+                uint pick = chosen(map);
+                for (int i = 0; i < current.Steps.Count; i++)
+                {
+                    RainbowStep step = current.Steps[i];
+                    if (((pick & (1u << i)) == 0 && step != last) || peak[step.Watch] >= step.Level) continue;
+                    if (step.Watch == PerksWatch) return $"{Math.Min(peak[PerksWatch], last.Level)} of {last.Level} perks";
+                    return step.Label;
+                }
+                return $"{Math.Min(peak[PerksWatch], last.Level)} of {last.Level} perks";
             }
         }
     }

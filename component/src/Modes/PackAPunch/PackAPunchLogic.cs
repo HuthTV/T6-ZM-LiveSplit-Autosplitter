@@ -26,6 +26,6 @@ namespace LiveSplit.T6ZM
 
         protected override void Reset() => split = false;
 
-        public override string Next => split ? "done" : "a player takes a PaP weapon";
+        public override string Next => split ? "done" : "waiting for PaP grab";
     }
 }
