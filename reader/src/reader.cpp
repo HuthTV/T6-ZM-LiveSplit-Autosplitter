@@ -694,7 +694,7 @@ void read_set(t6r_sample& out, std::uint32_t index) {
 }
 
 enum class ee_kind {
-    flag, field, length, entity, defined, equals, path, player_int, player_has
+    flag, field, length, entity, defined, equals, path, fields, player_int, player_has
 };
 
 struct ee_watch {
@@ -765,7 +765,7 @@ constexpr ee_watch ee_buried[] = {
 constexpr ee_watch ee_tomb[] = {
     ee_blackscreen,
     {1, ee_kind::flag, "activate_zone_nml", nullptr, nullptr},
-    {2, ee_kind::field, "n_soul_boxes_completed", nullptr, nullptr},
+    {2, ee_kind::fields, "_challenges", "s_team", "n_completed"},
     {3, ee_kind::field, "n_staffs_crafted", nullptr, nullptr},
     {4, ee_kind::flag, "ee_all_staffs_placed", nullptr, nullptr},
     {5, ee_kind::flag, "ee_mech_zombie_hole_opened", nullptr, nullptr},
@@ -909,6 +909,23 @@ bool ee_array_child(std::uint32_t array, const char* key, child& out) {
     return false;
 }
 
+bool ee_struct_child(std::uint32_t obj, const char* key, child& out) {
+    std::uint32_t type = 0, bounds[2] = {};
+    if (!object_type(obj, type) || type != type_struct || !read(g.children + obj * 8, bounds, sizeof(bounds))) return false;
+    std::uint32_t current = bounds[0], steps = 0;
+    while (current != 0 && ++steps <= 64) {
+        child c{};
+        std::string name;
+        if (!read_child(current, c) || c.owner != obj) return false;
+        if (c.key < child_limit && ee_child_name(ee.level, c.key, name) && name == key) {
+            out = c;
+            return true;
+        }
+        current = c.next;
+    }
+    return false;
+}
+
 std::int32_t ee_value(const ee_watch& watch, ee_slot& slot) {
     child c{};
     if (!ee_entry(*ee_owner(watch), slot, c)) return 0;
@@ -934,6 +951,11 @@ std::int32_t ee_value(const ee_watch& watch, ee_slot& slot) {
     case ee_kind::path: {
         child first{}, second{};
         if (c.tag != tag_object || !ee_array_child(c.payload, watch.key1, first) || first.tag != tag_object || !ee_array_child(first.payload, watch.key2, second) || second.tag != tag_int) return 0;
+        return static_cast<std::int32_t>(second.payload);
+    }
+    case ee_kind::fields: {
+        child first{}, second{};
+        if (c.tag != tag_object || !ee_struct_child(c.payload, watch.key1, first) || first.tag != tag_object || !ee_struct_child(first.payload, watch.key2, second) || second.tag != tag_int) return 0;
         return static_cast<std::int32_t>(second.payload);
     }
     }

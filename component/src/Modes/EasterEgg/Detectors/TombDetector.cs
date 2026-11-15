@@ -6,14 +6,12 @@ namespace LiveSplit.T6ZM
     internal sealed class TombDetector : EeDetector
     {
         const int NmlWatch = 1;
-        const int SoulBoxesWatch = 2;
+        const int TeamMedalWatch = 2;
         const int StaffsCraftedWatch = 3;
         const int StaffsPlacedWatch = 4;
         const int MechHoleWatch = 5;
         const int SamanthaReleasedWatch = 7;
         const int IntermissionWatch = 8;
-
-        const uint BoxesTicks = 86;
 
         bool released;
 
@@ -24,8 +22,8 @@ namespace LiveSplit.T6ZM
                 case NmlWatch:
                     if (Rose(e)) yield return new EeHit("NML", e.Clock);
                     break;
-                case SoulBoxesWatch:
-                    if (e.OldValue < 4 && e.NewValue >= 4) yield return new EeHit("boxes", e.Clock + BoxesTicks);
+                case TeamMedalWatch:
+                    if (Rose(e)) yield return new EeHit("boxes", e.Clock);
                     break;
                 case StaffsCraftedWatch:
                     for (int staff = Math.Max(e.OldValue + 1, 1); staff <= Math.Min(e.NewValue, 4); staff++)

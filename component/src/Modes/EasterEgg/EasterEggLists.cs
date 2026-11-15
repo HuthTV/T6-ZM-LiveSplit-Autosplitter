@@ -72,7 +72,7 @@ namespace LiveSplit.T6ZM
         static readonly EeStep TimeTravel = new EeStep("time_travel", "Time Travel", "flag sq_tpo_special_round_active or sq_wisp_saved_with_time_bomb");
         static readonly EeStep Sharpshooter = new EeStep("sharpshooter", "Sharpshooter", "level.buried_sq_maxis_complete or _richtofen_complete");
         static readonly EeStep MinedGames = new EeStep("mined_games", "Mined Games", "level.metagame_sq_maxis_complete or _richtofen_complete (Super only)");
-        static readonly EeStep Boxes = new EeStep("boxes", "Boxes", "level.n_soul_boxes_completed reaches 4, split 4.3 s later");
+        static readonly EeStep Boxes = new EeStep("boxes", "Boxes", "level._challenges.s_team.n_completed rises: the soul boxes' team medal");
         static readonly EeStep AscendFromDarkness = new EeStep("AFD", "AFD", "flag ee_all_staffs_placed");
         static readonly EeStep Freedom = new EeStep("freedom", "Freedom", "level.intermission rises after flag ee_samantha_released");
 

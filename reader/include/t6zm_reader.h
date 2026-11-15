@@ -38,7 +38,7 @@ enum t6r_profile {
 //   highrise 1 sq_atd_drg_puzzle_complete 2 sq_tower_active 3 num_perks 4 perk_purchased 5 laststand 7 revivetrigger 8 orb
 //   prison   1 dryer_cycle_active 2 gondola_initialized 3 gondola_in_motion 4 plane_boarded 5 nixie_ee_flashing 7 a_important_codes 8 m_headphones 9 winner
 //   buried   2 chest_has_been_used 3 spawn_ghosts 4 sq_tpo_special_round_active 5 sq_wisp_saved_with_time_bomb 7-8 sq complete 9-10 metagame complete 11 built 12 sq_is_max_tower_built 13 sq_ip_puzzle_complete 14 sq_ml_curr_lever
-//   tomb     1 activate_zone_nml 2 n_soul_boxes_completed 3 n_staffs_crafted 4 ee_all_staffs_placed 5 ee_mech_zombie_hole_opened 7 ee_samantha_released 8 intermission
+//   tomb     1 activate_zone_nml 2 _challenges.s_team.n_completed 3 n_staffs_crafted 4 ee_all_staffs_placed 5 ee_mech_zombie_hole_opened 7 ee_samantha_released 8 intermission
 
 #pragma pack(push, 4)
 typedef struct t6r_sample {
