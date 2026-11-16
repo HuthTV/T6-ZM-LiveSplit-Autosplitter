@@ -25,6 +25,11 @@ namespace LiveSplit.T6ZM
         public SongMap(string key, string script, string song, params SongStep[] steps)
             : base(key, script, steps, $"({GameMaps.Name(script)}) {song}", forced: 1u << (steps.Length - 1)) { }
 
+        public SongMap(string key, string script, string[] parts)
+            : this(key, script, SongMaps.AllSongs, new SongStep(SongMaps.AllSongs, SongStep.Event, 0)) => Parts = parts;
+
+        public string[] Parts { get; }
+
         public override uint Default
         {
             get
@@ -52,20 +57,25 @@ namespace LiveSplit.T6ZM
 
         static SongStep[] Extra(string label, int watch) => new[] { new SongStep(label, watch, 1, true) };
 
+        public const string AllSongs = "All songs";
+
         public static readonly SongMap[] All =
         {
-            Song("transit_carrion", "zm_transit", "Carrion", Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
-            Song("nuked_samantha", "zm_nuked", "Samantha's Lullaby", Rounds(2), Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
+            Song("transit_carrion", "zm_transit", "Carrion", Rounds(6), Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
+            Song("nuked_samantha", "zm_nuked", "Samantha's Lullaby", Rounds(6), Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
             Song("nuked_redamned", "zm_nuked", "Re-Damned", Rounds(6), Start("Re-Damned")),
             Song("nuked_cominghome", "zm_nuked", "Coming Home", Rounds(6), Start("Coming Home")),
-            Song("highrise_fall", "zm_highrise", "We All Fall Down", Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
-            Song("prison_rustycage", "zm_prison", "Rusty Cage", Counted("Bottle", "bottles", SongsLogic.MeteorWatch)),
-            Song("prison_whereare", "zm_prison", "Where Are We Going", Start("Afterlife revive"), Start("Where Are We Going")),
-            Song("buried_running", "zm_buried", "Always Running", Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
-            Song("tomb_shepherd", "zm_tomb", "Shepherd of Fire", Rounds(4), Counted("Radio", "radios", SongsLogic.RadioWatch)),
-            Song("tomb_archangel", "zm_tomb", "Archangel", Rounds(4), Counted("Meteorite", "meteorites", SongsLogic.MeteorWatch, "Green stone")),
-            Song("tomb_aether", "zm_tomb", "Aether", Extra("No Man's Land", SongsLogic.NmlWatch), Rounds(4),
+            new SongMap("nuked_all", "zm_nuked", new[] { "nuked_samantha", "nuked_redamned", "nuked_cominghome" }),
+            Song("highrise_fall", "zm_highrise", "We All Fall Down", Rounds(6), Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
+            Song("prison_rustycage", "zm_prison", "Rusty Cage", Rounds(6), Counted("Bottle", "bottles", SongsLogic.MeteorWatch)),
+            Song("prison_whereare", "zm_prison", "Where Are We Going", Rounds(6), Start("Afterlife revive"), Start("Where Are We Going")),
+            new SongMap("prison_all", "zm_prison", new[] { "prison_rustycage", "prison_whereare" }),
+            Song("buried_running", "zm_buried", "Always Running", Rounds(6), Counted("Teddy", "teddies", SongsLogic.MeteorWatch)),
+            Song("tomb_shepherd", "zm_tomb", "Shepherd of Fire", Rounds(6), Counted("Radio", "radios", SongsLogic.RadioWatch)),
+            Song("tomb_archangel", "zm_tomb", "Archangel", Rounds(6), Counted("Meteorite", "meteorites", SongsLogic.MeteorWatch, "Green stone")),
+            Song("tomb_aether", "zm_tomb", "Aether", Extra("No Man's Land", SongsLogic.NmlWatch), Rounds(6),
                 new[] { new SongStep("Aether", SongsLogic.AetherWatch, 3, items: "plates") }),
+            new SongMap("tomb_all", "zm_tomb", new[] { "tomb_shepherd", "tomb_archangel", "tomb_aether" }),
         };
 
         public static SongMap ByKey(string key) => All.FirstOrDefault(m => m.Key == key);

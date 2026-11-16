@@ -24,6 +24,7 @@ namespace LiveSplit.T6ZM
         uint? musicRise, nixieRise;
         uint? meteorSongClock;
         bool mannequinsDone, comingHome;
+        readonly HashSet<string> songsStarted = new HashSet<string>();
 
         public SongsLogic(SongMap song, Func<string, uint> chosen)
         {
@@ -46,12 +47,15 @@ namespace LiveSplit.T6ZM
 
         public override bool SupportsMap(string script) => script == song.Script;
 
+        bool Finished => (done & song.Forced) != 0;
+
         protected override void Reset()
         {
             Array.Clear(peak, 0, peak.Length);
             done = 0;
             musicRise = nixieRise = meteorSongClock = null;
             mannequinsDone = comingHome = false;
+            songsStarted.Clear();
         }
 
         protected override void OnNewLevel() => Reset();
@@ -66,8 +70,18 @@ namespace LiveSplit.T6ZM
                 yield break;
             }
 
+            if (Finished) yield break;
             uint pick = chosen(song.Key);
             if (e.Watch == MeteorWatch && e.OldValue < MeteorSongStart && e.NewValue >= MeteorSongStart) meteorSongClock = e.Clock;
+            if (song.Parts != null)
+            {
+                if (e.Watch > BlackscreenWatch && e.Watch < peak.Length) peak[e.Watch] = Math.Max(peak[e.Watch], e.NewValue);
+                if (SongEvent(e) is string started) songsStarted.Add(started);
+                if (PartsDone() < song.Parts.Length) yield break;
+                done |= song.Forced;
+                yield return new TimerAction(false, e.Clock, SongMaps.AllSongs);
+                yield break;
+            }
 
             if (e.Watch > BlackscreenWatch && e.Watch < peak.Length && e.NewValue > peak[e.Watch])
             {
@@ -82,10 +96,21 @@ namespace LiveSplit.T6ZM
             }
 
             string title = SongEvent(e);
-            if (title == null) yield break;
+            if (title == null || Finished) yield break;
             for (int i = 0; i < current.Steps.Count; i++)
                 if (current.Steps[i].Watch == SongStep.Event && current.Steps[i].Label == title && Take(i, pick, current))
                     yield return new TimerAction(false, e.Clock, title);
+        }
+
+        int PartsDone()
+        {
+            int count = 0;
+            foreach (string key in song.Parts)
+            {
+                SongStep last = SongMaps.ByKey(key).Steps.Last();
+                if (last.Watch == SongStep.Event ? songsStarted.Contains(last.Label) : peak[last.Watch] >= last.Level) count++;
+            }
+            return count;
         }
 
         bool Take(int index, uint pick, SongMap current)
@@ -130,6 +155,8 @@ namespace LiveSplit.T6ZM
             get
             {
                 SongMap current = song;
+                if (Finished) return "end reached";
+                if (song.Parts != null) return $"{PartsDone()} of {song.Parts.Length} songs";
                 uint pick = chosen(song.Key) & current.Every;
                 for (int i = 0; i < current.Steps.Count; i++)
                 {

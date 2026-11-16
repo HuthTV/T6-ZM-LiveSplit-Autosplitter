@@ -125,11 +125,11 @@ constexpr std::uint32_t built_value = 1;
 constexpr watch_def rainbow[] = {{watch_kind::flag, "initial_blackscreen_passed"}};
 
 constexpr map_wants song_wants[] = {
-    {"zm_transit", 1u << 1},
+    {"zm_transit", (1u << 1) | (1u << 8)},
     {"zm_nuked", (1u << 1) | (1u << 4) | (1u << 7) | (1u << 8)},
-    {"zm_highrise", 1u << 1},
-    {"zm_prison", (1u << 1) | (1u << 4) | (1u << 5)},
-    {"zm_buried", 1u << 1},
+    {"zm_highrise", (1u << 1) | (1u << 8)},
+    {"zm_prison", (1u << 1) | (1u << 4) | (1u << 5) | (1u << 8)},
+    {"zm_buried", (1u << 1) | (1u << 8)},
     {"zm_tomb", (1u << 1) | (1u << 2) | (1u << 3) | (1u << 8) | (1u << 9)},
     {nullptr, 0},
 };
