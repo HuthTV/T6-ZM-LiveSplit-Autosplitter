@@ -135,7 +135,8 @@ namespace LiveSplit.T6ZM
                 state.CurrentTimingMethod = TimingMethod.GameTime;
             }
 
-            settings.Locked = state.CurrentPhase != TimerPhase.NotRunning;
+            settings.Locked = state.CurrentPhase == TimerPhase.Running || state.CurrentPhase == TimerPhase.Paused;
+            settings.Pending = state.CurrentPhase == TimerPhase.Ended && settings.Version != logicVersion;
             settings.TimingsHeld = Running && logic.HoldsLiveSettings;
             if (state.CurrentPhase == TimerPhase.NotRunning && settings.Version != logicVersion)
             {

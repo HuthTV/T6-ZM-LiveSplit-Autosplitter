@@ -16,12 +16,14 @@ namespace LiveSplit.T6ZM
         readonly CheckBox showVelocity = new CheckBox { Text = "Show host player velocity", AutoSize = true };
         readonly CheckBox velocityDecimals = new CheckBox { Text = "Decimals", AutoSize = true, Enabled = false };
         readonly CheckBox showFps = new CheckBox { Text = "Show FPS", AutoSize = true };
-        readonly Label blocked = new Label { Text = "Some settings locked while timer is running", AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
+        const string LockedText = "Some settings locked while timer is running";
+        const string PendingText = "Applies to the next run";
+        readonly Label blocked = new Label { Text = LockedText, AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
         readonly Label description = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(424, 0), ForeColor = System.Drawing.SystemColors.ControlText, Font = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9f), Margin = Padding.Empty };
         readonly Panel descriptionBox = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = System.Drawing.SystemColors.ControlLight, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(6), Margin = new Padding(3, 2, 3, 8), MinimumSize = new System.Drawing.Size(436, 0) };
 
         readonly ModePage[] pages;
-        bool loading, locked, timingsHeld, onMapPage;
+        bool loading, locked, pending, timingsHeld, onMapPage;
 
         public Settings()
         {
@@ -77,6 +79,17 @@ namespace LiveSplit.T6ZM
             {
                 if (locked == value) return;
                 locked = value;
+                UpdateEnabled();
+            }
+        }
+
+        public bool Pending
+        {
+            get => pending;
+            set
+            {
+                if (pending == value) return;
+                pending = value;
                 UpdateEnabled();
             }
         }
@@ -141,7 +154,8 @@ namespace LiveSplit.T6ZM
         void UpdateEnabled()
         {
             category.Enabled = !locked;
-            blocked.Visible = locked;
+            blocked.Text = locked ? LockedText : PendingText;
+            blocked.Visible = locked || pending;
             foreach (ModePage page in pages)
                 page.UpdateEnabled(locked, timingsHeld);
         }
