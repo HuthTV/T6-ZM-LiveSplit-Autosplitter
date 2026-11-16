@@ -36,7 +36,7 @@ namespace LiveSplit.T6ZM
                 new Buildable("electric_trap", "Electric Trap"), new Buildable("powerswitch", "Power Switch"),
                 new Buildable("jetgun_zm", "Jetgun"), new Buildable("pap", "Pack-a-Punch"),
                 new Buildable("cattlecatcher", "Cow Catcher"), new Buildable("bushatch|dinerhatch", "Hatch"),
-                new Buildable("busladder", "Ladder"), new Buildable("sq_common", "NAV Table")),
+                new Buildable("busladder", "Ladder"), new Buildable("sq_common", "NAV Table", optional: true)),
             new BuildableMap("zm_highrise",
                 new Buildable("springpad_zm", "Trample Steam"), new Buildable("slipgun_zm", "Sliquifier"), new Buildable("sq_common", "NAV Table")),
             new BuildableMap("zm_buried",
