@@ -10,9 +10,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <Version>0.1.0</Version>
-    <!-- LiveSplit install used only as compile references, override with -p:LiveSplitDir=... -->
+    <!-- compile references, -p:LiveSplitDir=... -->
     <LiveSplitDir Condition="'$(LiveSplitDir)' == ''">$(USERPROFILE)\Desktop\LS</LiveSplitDir>
-    <!-- The native readers build.bat makes first. They are embedded so the component is one file. -->
     <NativeDir Condition="'$(NativeDir)' == ''">$(MSBuildThisFileDirectory)..\build\native</NativeDir>
   </PropertyGroup>
   <ItemGroup>

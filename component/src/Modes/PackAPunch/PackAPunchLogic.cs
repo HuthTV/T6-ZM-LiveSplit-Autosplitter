@@ -13,7 +13,7 @@ namespace LiveSplit.T6ZM
         const int ClassicWatch = 9;
         const int TownWatch = 10;
         public const int GensWatch = 11;
-        public const int GhostsWatch = 11;
+        public const int GhostsWatch = GensWatch;
         public const int DryerWatch = 12;
         public const int PartsWatch = 13;
         public const int PlaneWatch = 14;
@@ -28,8 +28,6 @@ namespace LiveSplit.T6ZM
         bool done;
 
         public PackAPunchLogic(Func<string, uint> chosen) => this.chosen = chosen;
-
-        public PackAPunchLogic() : this(key => PapMaps.ByKey(key)?.Default ?? 0) { }
 
         public override ReaderProfile Profile => ReaderProfile.PackAPunch;
 

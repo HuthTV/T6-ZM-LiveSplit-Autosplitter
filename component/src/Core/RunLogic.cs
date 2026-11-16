@@ -24,7 +24,6 @@ namespace LiveSplit.T6ZM
         }
 
         public ActionKind Kind { get; }
-        public bool Start => Kind == ActionKind.Start;
         public uint Tick { get; }
         public string Label { get; }
         public uint BaseTicks { get; }

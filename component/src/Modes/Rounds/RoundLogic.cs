@@ -59,8 +59,6 @@ namespace LiveSplit.T6ZM
 
         public override ReaderProfile Profile => ReaderProfile.Rounds;
 
-        public int SplitCount => milestones.Count;
-
         public void SetLimits(int finalRound, bool highRound)
         {
             this.finalRound = finalRound;

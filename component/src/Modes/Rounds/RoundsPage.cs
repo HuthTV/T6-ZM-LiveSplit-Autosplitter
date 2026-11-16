@@ -77,7 +77,6 @@ namespace LiveSplit.T6ZM
 
         public override void UpdateEnabled(bool locked, bool timingsHeld)
         {
-            unlimited.Enabled = true;
             maxRound.Enabled = !unlimited.Checked;
             lastMode.Enabled = !unlimited.Checked && !timingsHeld;
             splitMode.Enabled = !timingsHeld;

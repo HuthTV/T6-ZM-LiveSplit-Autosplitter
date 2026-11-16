@@ -1,6 +1,5 @@
 @echo off
-rem Builds the reader (x86 + x64) into build\native, then the LiveSplit component, which embeds both readers, into
-rem build\Components\LiveSplit.T6ZM.dll: the one file to install.
+rem readers (x86, x64) into build\native, then build\Components\LiveSplit.T6ZM.dll
 setlocal
 for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "T6R_VS=%%i"
 if not defined T6R_VS (

@@ -6,7 +6,7 @@ namespace LiveSplit.T6ZM
 {
     internal sealed class SongsPage : StepListPage<SongMap, SongStep>
     {
-        public SongsPage() : base(SongMaps.All, "Song:", mapWidth: 300, rows: 9, hasNote: true, honourForced: true) { }
+        public SongsPage() : base(SongMaps.All, "Song:", mapWidth: 300, rows: 9, honourForced: true) { }
 
         public RunLogic CreateLogic() => new SongsLogic(Selected, Mask);
 

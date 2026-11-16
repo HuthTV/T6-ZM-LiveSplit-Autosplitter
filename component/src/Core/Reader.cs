@@ -26,6 +26,7 @@ namespace LiveSplit.T6ZM
         public uint VelocityKnown;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)] public float[] Velocity;
         public float FrameMs;
+        public uint Offhost;
 
         public bool Known(int watch) => (WatchKnown & (1u << watch)) != 0;
     }

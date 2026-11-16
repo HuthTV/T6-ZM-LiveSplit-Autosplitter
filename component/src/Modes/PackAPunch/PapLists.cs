@@ -41,8 +41,8 @@ namespace LiveSplit.T6ZM
         public static readonly PapMap[] All =
         {
             new PapMap("transit", "zm_transit", "TranZit", One("Power on", PackAPunchLogic.PowerWatch)),
-            new PapMap(TownLocation, "zm_transit", "Town", Rounds(4)),
-            new PapMap("nuked", "zm_nuked", "Nuketown", Rounds(4)),
+            new PapMap(TownLocation, "zm_transit", "Town", Rounds(5)),
+            new PapMap("nuked", "zm_nuked", "Nuketown", Rounds(5)),
             new PapMap("highrise", "zm_highrise", "Die Rise"),
             new PapMap("prison", "zm_prison", "Mob of the Dead",
                 Join(new[] { One("Dryer", PackAPunchLogic.DryerWatch) }, Parts(), new[] { One("Plane built", PackAPunchLogic.PlaneWatch) })),

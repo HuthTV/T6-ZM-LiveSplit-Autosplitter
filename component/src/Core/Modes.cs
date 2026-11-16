@@ -20,9 +20,6 @@ namespace LiveSplit.T6ZM
         public static Mode WithPage<TPage>(Category category, string name, string description, Func<TPage, RunLogic> createLogic) where TPage : ModePage =>
             new Mode(category, name, description, typeof(TPage), page => createLogic((TPage)page));
 
-        public static Mode WithoutPage(Category category, string name, string description, Func<RunLogic> createLogic) =>
-            new Mode(category, name, description, null, page => createLogic());
-
         public Category Category { get; }
         public string Name { get; }
         public string Description { get; }
@@ -58,7 +55,7 @@ namespace LiveSplit.T6ZM
                 page => page.CreateLogic()),
         };
 
-        public static Mode Of(Category category) => All[(int)category];
+        public static Mode Of(Category category) => Array.Find(All, m => m.Category == category);
 
         public static ModePage[] CreatePages(Func<bool> superChosen) => new ModePage[]
         {

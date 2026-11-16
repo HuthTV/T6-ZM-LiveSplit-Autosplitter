@@ -4,16 +4,14 @@ namespace LiveSplit.T6ZM
 {
     internal class Step
     {
-        public Step(string id, string label, string description = null)
+        public Step(string id, string label)
         {
             Id = id;
             Label = label;
-            Description = description;
         }
 
         public string Id { get; }
         public string Label { get; }
-        public string Description { get; }
     }
 
     internal class StepList<TStep> where TStep : Step
@@ -31,7 +29,6 @@ namespace LiveSplit.T6ZM
         public string Script { get; }
         public string Name { get; }
         public IReadOnlyList<TStep> Steps { get; }
-        public string Note { get; set; }
         public uint Every => (uint)((1UL << Steps.Count) - 1);
 
         public uint Forced { get; }

@@ -4,7 +4,7 @@ namespace LiveSplit.T6ZM
 {
     internal sealed class PapPage : StepListPage<PapMap, PapStep>
     {
-        public PapPage() : base(PapMaps.All, "Map:", mapWidth: 220, rows: 9, hasNote: false, honourForced: true) { }
+        public PapPage() : base(PapMaps.All, "Map:", mapWidth: 220, rows: 9, honourForced: true) { }
 
         public RunLogic CreateLogic() => new PackAPunchLogic(Mask);
 

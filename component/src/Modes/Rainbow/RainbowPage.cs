@@ -4,7 +4,7 @@ namespace LiveSplit.T6ZM
 {
     internal sealed class RainbowPage : StepListPage<StepList<RainbowStep>, RainbowStep>
     {
-        public RainbowPage() : base(RainbowMaps.All, "Map:", mapWidth: 220, rows: 8, hasNote: false, honourForced: false) { }
+        public RainbowPage() : base(RainbowMaps.All, "Map:", mapWidth: 220, rows: 8, honourForced: false) { }
 
         public RunLogic CreateLogic() => new RainbowLogic(Mask);
 

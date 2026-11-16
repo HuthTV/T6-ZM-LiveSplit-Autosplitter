@@ -19,7 +19,7 @@ namespace LiveSplit.T6ZM
         readonly TimerModel timer;
         readonly Settings settings = new Settings();
         readonly Watcher watcher;
-        readonly Queue<TimerAction> pending = new Queue<TimerAction>();
+        readonly Queue<TimerAction> queued = new Queue<TimerAction>();
         readonly InfoTextComponent statusRow = new InfoTextComponent("T6ZM", "");
         readonly InfoTextComponent nextRow = new InfoTextComponent("Next", "");
         readonly InfoTextComponent motionRow = new InfoTextComponent("Velocity", "");
@@ -121,7 +121,7 @@ namespace LiveSplit.T6ZM
             baseTicks = 0;
             lastSplit = null;
             uncertain = null;
-            pending.Clear();
+            queued.Clear();
             madeSplits.Clear();
             if (!restarting) logic.TimerReset();
             if (inactiveSince == null) inactiveSince = DateTime.UtcNow;
@@ -136,7 +136,7 @@ namespace LiveSplit.T6ZM
             }
 
             settings.Locked = state.CurrentPhase == TimerPhase.Running || state.CurrentPhase == TimerPhase.Paused;
-            settings.Pending = state.CurrentPhase == TimerPhase.Ended && settings.Version != logicVersion;
+            settings.AppliesNextRun = state.CurrentPhase == TimerPhase.Ended && settings.Version != logicVersion;
             settings.TimingsHeld = Running && logic.HoldsLiveSettings;
             if (state.CurrentPhase == TimerPhase.NotRunning && settings.Version != logicVersion)
             {
@@ -148,7 +148,7 @@ namespace LiveSplit.T6ZM
             else if (settings.LiveVersion != liveVersion)
             {
                 liveVersion = settings.LiveVersion;
-                logic.ApplyLiveSettings(settings.LiveValues, pending, Running);
+                logic.ApplyLiveSettings(settings.LiveValues, queued, Running);
             }
 
             ReaderSample sample = watcher.Latest;
@@ -160,8 +160,9 @@ namespace LiveSplit.T6ZM
             {
                 if (e.Kind == GameEventKind.NewLevel)
                 {
-                    if (!logic.Continues && state.CurrentPhase != TimerPhase.NotRunning && settings.AutoReset) timer.Reset();
-                    pending.Clear();
+                    bool changed = state.CurrentPhase == TimerPhase.Ended && settings.Version != logicVersion;
+                    if ((!logic.Continues || changed) && state.CurrentPhase != TimerPhase.NotRunning && settings.AutoReset) timer.Reset();
+                    queued.Clear();
                     logic.NewLevel();
                     continue;
                 }
@@ -174,7 +175,7 @@ namespace LiveSplit.T6ZM
                         case ActionKind.Rebase: Rebase(action, e.Generation); break;
                         default:
                             if (action.Kind == ActionKind.Split && e.Window > 1) uncertain = $"{action.Label} ({e.Window} ticks)";
-                            pending.Enqueue(action);
+                            queued.Enqueue(action);
                             break;
                     }
                 }
@@ -186,9 +187,9 @@ namespace LiveSplit.T6ZM
                 Start(logic.StartRun(due), sample.Generation);
 
             bool live = Running && sample.Generation == startGeneration && sample.Status >= ReaderStatus.NoLevel;
-            while (live && Running && pending.Count > 0 && pending.Peek().Tick <= sample.Clock)
+            while (live && Running && queued.Count > 0 && queued.Peek().Tick <= sample.Clock)
             {
-                TimerAction next = pending.Dequeue();
+                TimerAction next = queued.Dequeue();
                 if (next.Kind == ActionKind.Pause)
                 {
                     timer.Pause();
@@ -247,7 +248,7 @@ namespace LiveSplit.T6ZM
             startClock = action.Tick;
             startGeneration = generation;
             baseTicks = action.BaseTicks;
-            pending.Clear();
+            queued.Clear();
             madeSplits.Clear();
             attemptStartUtc = DateTime.UtcNow;
             inactiveSince = null;
@@ -263,7 +264,7 @@ namespace LiveSplit.T6ZM
             startGeneration = generation;
             baseTicks = action.BaseTicks;
             state.SetGameTime(Ticks(baseTicks));
-            pending.Clear();
+            queued.Clear();
             CaptureAttempt(watcher.Latest);
             SaveRun(watcher.Latest);
         }
@@ -376,7 +377,7 @@ namespace LiveSplit.T6ZM
             attemptStartUtc = started;
             CaptureAttempt(sample);
             inactiveSince = null;
-            pending.Clear();
+            queued.Clear();
             state.SetGameTime(Ticks(baseTicks + sample.Clock - startClock.Value));
             if (run.Paused) timer.Pause();
             SaveRun(sample);
@@ -407,7 +408,9 @@ namespace LiveSplit.T6ZM
             {
                 case ReaderStatus.NoProcess: return "waiting for game";
                 case ReaderStatus.Unsupported: return "unsupported build";
-                case ReaderStatus.NoLevel: return Running ? "waiting for map, game time paused" : "waiting for map";
+                case ReaderStatus.NoLevel:
+                    if (s.Offhost != 0) return "client: host only";
+                    return Running ? "waiting for map, game time paused" : "waiting for map";
                 case ReaderStatus.Resolving: return $"{Map(s)} loading";
                 default:
                     string detail = logic.StatusDetail(s) is string text ? text + ", " : "";
@@ -457,7 +460,7 @@ namespace LiveSplit.T6ZM
                 case TimerPhase.Running:
                 case TimerPhase.Paused:
                     if (!startClock.HasValue) return "manual start, no game time";
-                    return pending.Count > 0 ? logic.NextWaiting(pending.Peek()) : logic.Next;
+                    return queued.Count > 0 ? logic.NextWaiting(queued.Peek()) : logic.Next;
                 default: return lastSplit != null ? "done (" + lastSplit + ")" : "done";
             }
         }

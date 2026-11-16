@@ -46,13 +46,12 @@ namespace LiveSplit.T6ZM
         readonly TList[] lists;
         readonly ComboBox map;
         readonly CheckedListBox checks = new CheckedListBox { CheckOnClick = true, IntegralHeight = false, Width = 386, Margin = Padding.Empty };
-        readonly Label note;
         readonly bool honourForced;
         bool filling;
 
         protected readonly StepTicks Ticks;
 
-        protected StepListPage(TList[] lists, string caption, int mapWidth, int rows, bool hasNote, bool honourForced)
+        protected StepListPage(TList[] lists, string caption, int mapWidth, int rows, bool honourForced)
         {
             this.lists = lists;
             this.honourForced = honourForced;
@@ -62,11 +61,6 @@ namespace LiveSplit.T6ZM
             map.SelectedIndex = 0;
             Controls.Add(Row(Caption(caption), map));
             Controls.Add(checks);
-            if (hasNote)
-            {
-                note = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(386, 0), ForeColor = System.Drawing.SystemColors.GrayText, Margin = new Padding(3, 4, 3, 0) };
-                Controls.Add(note);
-            }
             checks.Height = checks.ItemHeight * rows + (checks.Height - checks.ClientSize.Height);
             Hook(map);
             map.SelectedIndexChanged += (s, e) => Fill();
@@ -84,8 +78,9 @@ namespace LiveSplit.T6ZM
 
         public override void SelectGameMap(string game, bool locked)
         {
+            if (Selected.Script == game) return;
             int index = Array.FindIndex(lists, m => m.Script == game);
-            if (index >= 0 && map.SelectedIndex != index) map.SelectedIndex = index;
+            if (index >= 0) map.SelectedIndex = index;
         }
 
         public override void AfterLoad() => Fill();
@@ -110,11 +105,6 @@ namespace LiveSplit.T6ZM
         {
             TList list = Selected;
             uint mask = Mask(list);
-            if (note != null)
-            {
-                note.Text = list.Note ?? "";
-                note.Visible = !string.IsNullOrEmpty(list.Note);
-            }
             filling = true;
             checks.BeginUpdate();
             checks.Items.Clear();

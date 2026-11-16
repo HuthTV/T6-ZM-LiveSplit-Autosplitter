@@ -62,7 +62,6 @@ namespace LiveSplit.T6ZM
 
         public override IEnumerable<TimerAction> OnChange(GameEvent e, bool running)
         {
-            SongMap current = song;
             if (!SupportsMap(map)) yield break;
             if (!running)
             {
@@ -87,18 +86,18 @@ namespace LiveSplit.T6ZM
             {
                 int before = peak[e.Watch];
                 peak[e.Watch] = e.NewValue;
-                for (int i = 0; i < current.Steps.Count; i++)
+                for (int i = 0; i < song.Steps.Count; i++)
                 {
-                    SongStep step = current.Steps[i];
+                    SongStep step = song.Steps[i];
                     if (step.Watch != e.Watch || step.Level <= before || step.Level > e.NewValue) continue;
-                    if (Take(i, pick, current)) yield return new TimerAction(false, e.Clock, step.Label);
+                    if (Take(i, pick)) yield return new TimerAction(false, e.Clock, step.Label);
                 }
             }
 
             string title = SongEvent(e);
             if (title == null || Finished) yield break;
-            for (int i = 0; i < current.Steps.Count; i++)
-                if (current.Steps[i].Watch == SongStep.Event && current.Steps[i].Label == title && Take(i, pick, current))
+            for (int i = 0; i < song.Steps.Count; i++)
+                if (song.Steps[i].Watch == SongStep.Event && song.Steps[i].Label == title && Take(i, pick))
                     yield return new TimerAction(false, e.Clock, title);
         }
 
@@ -113,13 +112,12 @@ namespace LiveSplit.T6ZM
             return count;
         }
 
-        bool Take(int index, uint pick, SongMap current)
+        bool Take(int index, uint pick)
         {
             uint bit = 1u << index;
             if ((done & bit) != 0) return false;
             done |= bit;
-            if ((pick & bit) == 0) return false;
-            return true;
+            return (pick & bit) != 0;
         }
 
         string SongEvent(GameEvent e)
@@ -154,14 +152,13 @@ namespace LiveSplit.T6ZM
         {
             get
             {
-                SongMap current = song;
-                if (Finished) return "end reached";
+                    if (Finished) return "end reached";
                 if (song.Parts != null) return $"{PartsDone()} of {song.Parts.Length} songs";
-                uint pick = chosen(song.Key) & current.Every;
-                for (int i = 0; i < current.Steps.Count; i++)
+                uint pick = chosen(song.Key) & song.Every;
+                for (int i = 0; i < song.Steps.Count; i++)
                 {
                     if ((pick & (1u << i)) == 0 || (done & (1u << i)) != 0) continue;
-                    SongStep step = current.Steps[i];
+                    SongStep step = song.Steps[i];
                     if (step.Items != null) return $"{Math.Min(peak[step.Watch], 3)} of 3 {step.Items}";
                     if (step.Watch == RoundWatch) return "end of round " + (step.Level - 1);
                     return step.Label;

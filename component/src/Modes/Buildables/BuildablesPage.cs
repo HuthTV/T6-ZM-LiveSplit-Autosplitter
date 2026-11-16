@@ -4,7 +4,7 @@ namespace LiveSplit.T6ZM
 {
     internal sealed class BuildablesPage : StepListPage<BuildableMap, Buildable>
     {
-        public BuildablesPage() : base(BuildableMaps.All, "Map:", mapWidth: 220, rows: 11, hasNote: true, honourForced: false) { }
+        public BuildablesPage() : base(BuildableMaps.All, "Map:", mapWidth: 220, rows: 11, honourForced: false) { }
 
         public RunLogic CreateLogic() => new BuildablesLogic(Mask);
 

@@ -17,13 +17,13 @@ namespace LiveSplit.T6ZM
         readonly CheckBox velocityDecimals = new CheckBox { Text = "Velocity Decimals", AutoSize = true, Enabled = false };
         readonly CheckBox showFps = new CheckBox { Text = "FPS", AutoSize = true };
         const string LockedText = "Some settings locked while timer is running";
-        const string PendingText = "Applies to the next run";
+        const string NextRunText = "Applies to the next run";
         readonly Label blocked = new Label { Text = LockedText, AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
         readonly Label description = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(424, 0), ForeColor = System.Drawing.SystemColors.ControlText, Font = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9f), Margin = Padding.Empty };
         readonly Panel descriptionBox = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = System.Drawing.SystemColors.ControlLight, BorderStyle = BorderStyle.FixedSingle, Padding = new Padding(6), Margin = new Padding(3, 2, 3, 8), MinimumSize = new System.Drawing.Size(436, 0) };
 
         readonly ModePage[] pages;
-        bool loading, locked, pending, timingsHeld, onMapPage;
+        bool loading, locked, appliesNextRun, timingsHeld, onMapPage;
 
         public Settings()
         {
@@ -48,11 +48,7 @@ namespace LiveSplit.T6ZM
             AutoSize = true;
 
             category.SelectedIndexChanged += (s, e) => Changed();
-            showInfo.CheckedChanged += (s, e) => Changed();
-            foreach (CheckBox box in new[] { autoStart, autoSplit, autoReset }) box.CheckedChanged += (s, e) => Changed();
-            showVelocity.CheckedChanged += (s, e) => { velocityDecimals.Enabled = showVelocity.Checked; Changed(); };
-            velocityDecimals.CheckedChanged += (s, e) => Changed();
-            showFps.CheckedChanged += (s, e) => Changed();
+            showVelocity.CheckedChanged += (s, e) => velocityDecimals.Enabled = showVelocity.Checked;
             foreach (ModePage page in pages)
             {
                 page.SettingChanged += Changed;
@@ -78,13 +74,13 @@ namespace LiveSplit.T6ZM
             }
         }
 
-        public bool Pending
+        public bool AppliesNextRun
         {
-            get => pending;
+            get => appliesNextRun;
             set
             {
-                if (pending == value) return;
-                pending = value;
+                if (appliesNextRun == value) return;
+                appliesNextRun = value;
                 UpdateEnabled();
             }
         }
@@ -111,14 +107,14 @@ namespace LiveSplit.T6ZM
 
         Mode Mode => Modes.Of(Category);
 
-        ModePage Page => Mode.PageType == null ? null : pages.First(page => page.GetType() == Mode.PageType);
+        ModePage Page => pages.First(page => page.GetType() == Mode.PageType);
 
         public RunLogic CreateLogic() => Mode.CreateLogic(Page);
 
         void Changed()
         {
             ModePage shown = Page;
-            bool mapPage = shown != null && shown.ListsMaps;
+            bool mapPage = shown.ListsMaps;
             bool opened = mapPage && !onMapPage;
             onMapPage = mapPage;
             foreach (ModePage page in pages)
@@ -143,14 +139,14 @@ namespace LiveSplit.T6ZM
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (Visible && Page != null && Page.ListsMaps) SelectGameMap();
+            if (Visible && Page.ListsMaps) SelectGameMap();
         }
 
         void UpdateEnabled()
         {
             category.Enabled = !locked;
-            blocked.Text = locked ? LockedText : PendingText;
-            blocked.Visible = locked || pending;
+            blocked.Text = locked ? LockedText : NextRunText;
+            blocked.Visible = locked || appliesNextRun;
             foreach (ModePage page in pages)
                 page.UpdateEnabled(locked, timingsHeld);
         }
