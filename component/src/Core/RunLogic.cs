@@ -70,10 +70,6 @@ namespace LiveSplit.T6ZM
 
         public virtual bool HoldsLiveSettings => false;
 
-        public virtual string ManualSegment(Queue<TimerAction> waiting) => null;
-
-        public virtual bool ManualUndo(IReadOnlyCollection<TimerAction> waiting) => false;
-
         public virtual string StatusDetail(ReaderSample sample) => null;
 
         public virtual string NextWaiting(TimerAction waiting) => Next;

@@ -41,7 +41,6 @@ namespace LiveSplit.T6ZM
         readonly SortedSet<int> milestones = new SortedSet<int>();
         readonly Dictionary<int, uint> reached = new Dictionary<int, uint>();
         readonly HashSet<int> eligible = new HashSet<int>();
-        readonly HashSet<int> undone = new HashSet<int>();
         int current;
         readonly List<uint> roundStarts = new List<uint>();
         readonly List<int> history = new List<int>();
@@ -66,25 +65,6 @@ namespace LiveSplit.T6ZM
         {
             this.finalRound = finalRound;
             this.highRound = highRound;
-        }
-
-        public int? ConsumeNext()
-        {
-            if (!(NextMilestone is int round)) return null;
-            released = round;
-            history.Add(round);
-            return round;
-        }
-
-        public void UndoLast(int queued = 0)
-        {
-            int index = history.Count - 1 - queued;
-            if (index < 0) return;
-            int round = history[index];
-            history.RemoveAt(index);
-            released = history.Count > 0 ? history.Max() : 0;
-            eligible.Remove(round);
-            if (round <= current) undone.Add(round);
         }
 
         public bool Keeps(int round) => milestones.Contains(round);
@@ -127,23 +107,6 @@ namespace LiveSplit.T6ZM
             waiting.Clear();
             foreach (TimerAction queued in kept) waiting.Enqueue(queued);
             if (running) foreach (TimerAction action in Release()) waiting.Enqueue(action);
-        }
-
-        public override string ManualSegment(Queue<TimerAction> waiting)
-        {
-            int? round;
-            if (waiting.Count > 0 && waiting.Peek().Kind == ActionKind.Split)
-            {
-                round = RoundOf(waiting.Dequeue().Label);
-            }
-            else round = ConsumeNext();
-            return round == null ? null : "round " + round;
-        }
-
-        public override bool ManualUndo(IReadOnlyCollection<TimerAction> waiting)
-        {
-            UndoLast(waiting.Count(a => a.Kind == ActionKind.Split));
-            return true;
         }
 
         public override string StatusDetail(ReaderSample sample) => sample.Known(RoundWatch) ? $"round {sample.Values[RoundWatch]}" : null;
@@ -221,7 +184,6 @@ namespace LiveSplit.T6ZM
         {
             reached.Clear();
             eligible.Clear();
-            undone.Clear();
             current = 0;
             roundStarts.Clear();
             history.Clear();
@@ -234,7 +196,9 @@ namespace LiveSplit.T6ZM
 
         public override bool CanResume => true;
 
-        public override string SaveState() => string.Join(",", undone.OrderBy(r => r));
+        const string ReleasedTag = "r";
+
+        public override string SaveState() => ReleasedTag + released;
 
         public override int Resume(string saved, IReadOnlyList<string> splits, ReaderSample sample)
         {
@@ -246,14 +210,12 @@ namespace LiveSplit.T6ZM
                     last = Math.Max(last, round);
                     history.Add(round);
                 }
-            released = last;
-            undone.Clear();
-            foreach (string part in (saved ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
-                if (int.TryParse(part, out int gone)) undone.Add(gone);
+            released = saved != null && saved.StartsWith(ReleasedTag) && int.TryParse(saved.Substring(ReleasedTag.Length), out int kept) && kept >= 0
+                ? Math.Max(kept, last) : last;
             int now = sample.Known(RoundWatch) ? sample.Values[RoundWatch] : 0;
             current = Math.Max(current, now);
             int skipped = 0;
-            foreach (int milestone in milestones.Where(r => r > released && r <= now && !undone.Contains(r)))
+            foreach (int milestone in milestones.Where(r => r > released && r <= now))
             {
                 skipped++;
                 released = milestone;

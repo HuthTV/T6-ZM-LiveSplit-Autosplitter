@@ -91,14 +91,16 @@ namespace LiveSplit.T6ZM
 
         bool Active => startClock.HasValue && (state.CurrentPhase == TimerPhase.Running || state.CurrentPhase == TimerPhase.Paused);
 
+        const string ManualSplitLabel = "(manual)";
+        const string ManualSkipLabel = "(skipped)";
+
         bool ownSplit;
         bool restarting;
 
         void ManualSegment(bool split)
         {
             if (ownSplit || !Active) return;
-            string label = logic.ManualSegment(pending);
-            if (label == null) return;
+            string label = split ? ManualSplitLabel : ManualSkipLabel;
             Time made = default(Time);
             int index = state.CurrentSplitIndex - 1;
             if (split && index >= 0 && index < state.Run.Count) made = state.Run[index].SplitTime;
@@ -108,7 +110,7 @@ namespace LiveSplit.T6ZM
 
         void ManualUndo()
         {
-            if (ownSplit || !Active || !logic.ManualUndo(pending)) return;
+            if (ownSplit || !Active) return;
             if (madeSplits.Count > 0) madeSplits.RemoveAt(madeSplits.Count - 1);
             SaveRun(watcher.Latest);
         }
@@ -355,7 +357,7 @@ namespace LiveSplit.T6ZM
             for (int i = 0; i < skip && index < state.Run.Count - 1; i++)
             {
                 state.Run[index++].SplitTime = default(Time);
-                madeSplits.Add(new SavedSplit { Label = "(skipped)" });
+                madeSplits.Add(new SavedSplit { Label = ManualSkipLabel });
             }
             state.CurrentSplitIndex = index;
 
