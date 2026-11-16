@@ -9,13 +9,13 @@ namespace LiveSplit.T6ZM
     internal sealed class Settings : UserControl
     {
         readonly ComboBox category = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
-        readonly CheckBox showInfo = new CheckBox { Text = "Show info display", Checked = true, AutoSize = true };
+        readonly CheckBox showInfo = new CheckBox { Text = "Split debug", Checked = true, AutoSize = true };
         readonly CheckBox autoStart = new CheckBox { Text = "Start", Checked = true, AutoSize = true };
         readonly CheckBox autoSplit = new CheckBox { Text = "Split", Checked = true, AutoSize = true };
         readonly CheckBox autoReset = new CheckBox { Text = "Reset", Checked = true, AutoSize = true };
-        readonly CheckBox showVelocity = new CheckBox { Text = "Show host player velocity", AutoSize = true };
-        readonly CheckBox velocityDecimals = new CheckBox { Text = "Decimals", AutoSize = true, Enabled = false };
-        readonly CheckBox showFps = new CheckBox { Text = "Show FPS", AutoSize = true };
+        readonly CheckBox showVelocity = new CheckBox { Text = "Velocity", AutoSize = true };
+        readonly CheckBox velocityDecimals = new CheckBox { Text = "Velocity Decimals", AutoSize = true, Enabled = false };
+        readonly CheckBox showFps = new CheckBox { Text = "FPS", AutoSize = true };
         const string LockedText = "Some settings locked while timer is running";
         const string PendingText = "Applies to the next run";
         readonly Label blocked = new Label { Text = LockedText, AutoSize = true, ForeColor = System.Drawing.Color.Firebrick, Anchor = AnchorStyles.Left, Visible = false };
@@ -33,22 +33,17 @@ namespace LiveSplit.T6ZM
             pages = Modes.CreatePages(() => Category == Category.SuperEasterEgg);
 
             var layout = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
-            var bold = new System.Drawing.Font(Control.DefaultFont.FontFamily, 9.5f, System.Drawing.FontStyle.Bold);
-            Label controlCaption = Caption("Autosplitter:");
-            controlCaption.Font = bold;
-            layout.Controls.Add(Row(controlCaption, autoStart, autoSplit, autoReset));
+            layout.Controls.Add(Row(Caption("Autosplitter:"), autoStart, autoSplit, autoReset));
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
-            Label categoryCaption = Caption("Category:");
-            categoryCaption.Font = bold;
-            layout.Controls.Add(Row(categoryCaption, category, blocked));
+            layout.Controls.Add(Row(Caption("Category:"), category, blocked));
             descriptionBox.Controls.Add(description);
             layout.Controls.Add(descriptionBox);
             foreach (ModePage page in pages)
                 layout.Controls.Add(page);
             layout.Controls.Add(new Label { BorderStyle = BorderStyle.Fixed3D, Height = 2, Width = 436, Margin = new Padding(3, 8, 3, 8) });
-            layout.Controls.Add(showInfo);
             layout.Controls.Add(Row(showVelocity, velocityDecimals));
             layout.Controls.Add(showFps);
+            layout.Controls.Add(showInfo);
             Controls.Add(layout);
             AutoSize = true;
 

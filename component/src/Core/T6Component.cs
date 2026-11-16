@@ -411,7 +411,7 @@ namespace LiveSplit.T6ZM
                 case ReaderStatus.Resolving: return $"{Map(s)} loading";
                 default:
                     string detail = logic.StatusDetail(s) is string text ? text + ", " : "";
-                    return $"{Map(s)} {detail}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
+                    return $"{detail}tick {s.Clock}" + (uncertain != null ? ", uncertain: " + uncertain : "");
             }
         }
 

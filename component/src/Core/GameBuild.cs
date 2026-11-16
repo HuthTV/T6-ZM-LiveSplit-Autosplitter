@@ -21,7 +21,7 @@ namespace LiveSplit.T6ZM
                 string image = QueryFullProcessImageName(handle, 0, path, ref size) ? path.ToString() : "";
                 string exe = Path.GetFileName(image);
                 if (exe.Equals("plutonium-bootstrapper-win32.exe", StringComparison.OrdinalIgnoreCase))
-                    return image.IndexOf("\\" + CompFolder + "\\", StringComparison.OrdinalIgnoreCase) >= 0 ? "Plutonium (comp)" : "Plutonium";
+                    return image.IndexOf("\\" + CompFolder + "\\", StringComparison.OrdinalIgnoreCase) >= 0 ? "Pluto (comp)" : "Pluto";
                 if (exe.Equals("t6zm.exe", StringComparison.OrdinalIgnoreCase))
                     return Environment.Is64BitOperatingSystem && IsWow64Process(handle, out bool wow) && !wow ? "W Store" : "Steam";
                 return "T6ZM";
