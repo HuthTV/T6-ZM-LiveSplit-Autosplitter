@@ -76,7 +76,7 @@ namespace LiveSplit.T6ZM
             }
         }
 
-        public string ComponentName => "T6 Zombies Autosplitter";
+        public string ComponentName => "T6ZM Autosplitter";
         public float HorizontalWidth => Rows.Sum(r => r.HorizontalWidth);
         public float MinimumHeight => Rows.Select(r => r.MinimumHeight).DefaultIfEmpty(0).Max();
         public float VerticalHeight => Rows.Sum(r => r.VerticalHeight);
