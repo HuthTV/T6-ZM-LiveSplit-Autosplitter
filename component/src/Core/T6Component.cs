@@ -196,6 +196,14 @@ namespace LiveSplit.T6ZM
                 }
                 state.SetGameTime(Ticks(baseTicks + next.Tick - startClock.Value));
                 if (!settings.AutoSplit) continue;
+                if (next.Kind == ActionKind.Skip)
+                {
+                    ownSplit = true;
+                    try { timer.SkipSplit(); } finally { ownSplit = false; }
+                    madeSplits.Add(new SavedSplit { Label = ManualSkipLabel });
+                    SaveRun(sample);
+                    continue;
+                }
                 int index = state.CurrentSplitIndex;
                 ownSplit = true;
                 try { timer.Split(); } finally { ownSplit = false; }

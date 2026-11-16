@@ -134,7 +134,7 @@ constexpr map_wants song_wants[] = {
     {nullptr, 0},
 };
 
-constexpr profile_def profiles[] = {{songs, 10, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used"}, {buildables, 1, nullptr, true},
+constexpr profile_def profiles[] = {{songs, 10, nullptr, false, {}, nullptr, nullptr, songs_optional_from, song_wants}, {rounds, 3}, {pack_a_punch, 1, "pap_used", false, {}, nullptr, nullptr, 32, nullptr, true}, {buildables, 1, nullptr, true},
                                     {rainbow, 1, nullptr, false, {"num_perks", "player_perk_purchase_limit"}, "dig_vars", "has_upgraded_shovel"},
                                     {nullptr, 0, nullptr, false, {}, nullptr, nullptr, 32, nullptr, true}
                                     T6R_EXTRA_PROFILES};
@@ -778,6 +778,34 @@ constexpr ee_watch ee_tomb[] = {
     {8, ee_kind::field, "intermission", nullptr, nullptr},
     {15, ee_kind::length, "players", nullptr, nullptr},
 };
+constexpr ee_watch pap_transit[] = {
+    {7, ee_kind::field, "round_number", nullptr, nullptr},
+    {8, ee_kind::flag, "power_on", nullptr, nullptr},
+    {9, ee_kind::equals, "scr_zm_ui_gametype", "zclassic", nullptr},
+    {10, ee_kind::equals, "scr_zm_map_start_location", "town", nullptr},
+};
+constexpr ee_watch pap_nuked[] = {
+    {7, ee_kind::field, "round_number", nullptr, nullptr},
+};
+constexpr ee_watch pap_prison[] = {
+    {12, ee_kind::flag, "dryer_cycle_active", nullptr, nullptr},
+    {13, ee_kind::field, "n_plane_pieces_found", nullptr, nullptr},
+    {14, ee_kind::flag, "plane_built", nullptr, nullptr},
+};
+constexpr ee_watch pap_buried[] = {
+    {11, ee_kind::flag, "spawn_ghosts", nullptr, nullptr},
+};
+constexpr ee_watch pap_tomb[] = {
+    {7, ee_kind::field, "round_number", nullptr, nullptr},
+    {11, ee_kind::flag, "all_zones_captured", nullptr, nullptr},
+};
+constexpr ee_map_def pap_maps[] = {
+    {"zm_transit", pap_transit, static_cast<std::uint32_t>(std::size(pap_transit)), 0},
+    {"zm_nuked", pap_nuked, static_cast<std::uint32_t>(std::size(pap_nuked)), 0},
+    {"zm_prison", pap_prison, static_cast<std::uint32_t>(std::size(pap_prison)), 0},
+    {"zm_buried", pap_buried, static_cast<std::uint32_t>(std::size(pap_buried)), 0},
+    {"zm_tomb", pap_tomb, static_cast<std::uint32_t>(std::size(pap_tomb)), 0},
+};
 constexpr ee_map_def ee_maps[] = {
     {"zm_transit", ee_transit, static_cast<std::uint32_t>(std::size(ee_transit)), 0},
     {"zm_highrise", ee_highrise, static_cast<std::uint32_t>(std::size(ee_highrise)), 0, 8, 2},
@@ -1084,8 +1112,9 @@ void read_ee(t6r_sample& out) {
         ee = ee_state{};
         ee.generation = g.generation;
         ee.flag_array = g.flag_array;
-        const ee_map_def* list = ee_maps;
-        std::size_t list_size = std::size(ee_maps);
+        const bool pap = g.profile == T6R_PROFILE_PACK_A_PUNCH;
+        const ee_map_def* list = pap ? pap_maps : ee_maps;
+        std::size_t list_size = pap ? std::size(pap_maps) : std::size(ee_maps);
         for (std::size_t i = 0; i < list_size; ++i)
             if (std::strcmp(g.map, list[i].map) == 0) ee.map = &list[i];
         ee.level.obj = g.level;

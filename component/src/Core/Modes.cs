@@ -53,9 +53,9 @@ namespace LiveSplit.T6ZM
             Mode.WithPage<BuildablesPage>(Category.Buildables, "Buildables",
                 "Splits can be done in any order.",
                 page => page.CreateLogic()),
-            Mode.WithoutPage(Category.PackAPunch, "Pack-a-Punch",
-                "Splits once a player grabs an upgraded weapon from Pack-a-Punch machine.",
-                () => new PackAPunchLogic()),
+            Mode.WithPage<PapPage>(Category.PackAPunch, "Pack-a-Punch",
+                "Any player's PaP grab is the final split. A later step skips earlier ones not done.",
+                page => page.CreateLogic()),
         };
 
         public static Mode Of(Category category) => All[(int)category];
@@ -67,6 +67,7 @@ namespace LiveSplit.T6ZM
             new RainbowPage(),
             new SongsPage(),
             new EasterEggPage(superChosen),
+            new PapPage(),
         };
     }
 }

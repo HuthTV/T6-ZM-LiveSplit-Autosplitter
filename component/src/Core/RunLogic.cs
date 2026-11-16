@@ -8,6 +8,7 @@ namespace LiveSplit.T6ZM
         Split,
         Rebase,
         Pause,
+        Skip,
     }
 
     internal readonly struct TimerAction

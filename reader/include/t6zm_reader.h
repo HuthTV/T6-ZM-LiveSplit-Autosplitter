@@ -21,7 +21,7 @@ enum t6r_status {
 enum t6r_profile {
     T6R_PROFILE_SONGS = 0,        // 1 meteor_counter 2 snd115count 3 found_ee_radio_count 4 music_override 5 nixie_puzzle_solved 7 mannequin_count 8 round_number 9 activate_zone_nml
     T6R_PROFILE_ROUNDS = 1,       // 1 round_number 2 round_start_time
-    T6R_PROFILE_PACK_A_PUNCH = 2, // 1-4 players[i].pap_used 5 players
+    T6R_PROFILE_PACK_A_PUNCH = 2, // 1-4 players[i].pap_used 5 players 7 round_number 8 power_on 9 zclassic 10 town 11 all_zones_captured|spawn_ghosts 12 dryer_cycle_active 13 n_plane_pieces_found 14 plane_built
     T6R_PROFILE_BUILDABLES = 3,   // 1 built
     T6R_PROFILE_RAINBOW = 4,      // 1 num_perks 2 player_perk_purchase_limit 3 has_upgraded_shovel 5 players
     T6R_PROFILE_EASTER_EGG = 5,
