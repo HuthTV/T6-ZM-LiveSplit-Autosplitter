@@ -147,21 +147,31 @@ namespace LiveSplit.T6ZM
                 }
                 IReadOnlyList<EeMap> parts = map.Parts;
                 bool headed = superPage || parts.Count > 1;
-                int height = 0;
+                int shared = map.Shared(coop, superPage);
+                StepList<EeStep>[] partLists = parts.Select(p => p.List(coop, superPage)).ToArray();
+                int first = 0;
+                if (shared > 0)
+                {
+                    if (superPage) grid?.Place(Title(map.Name), 0, first++, false);
+                    uint sharedMask = EeMask(parts[0], superPage, coop);
+                    for (int i = 0; i < shared; i++)
+                        grid?.Place(StepBox(partLists, i, (sharedMask & (1u << i)) != 0), 0, first++, superPage);
+                }
+                int height = first;
                 for (int column = 0; column < parts.Count; column++)
                 {
                     EeMap part = parts[column];
-                    StepList<EeStep> list = part.List(coop, superPage);
-                    height = Math.Max(height, list.Steps.Count + (headed ? 1 : 0));
+                    StepList<EeStep> list = partLists[column];
+                    height = Math.Max(height, first + list.Steps.Count - shared + (headed ? 1 : 0));
                     if (grid == null) continue;
                     if (headed)
                     {
-                        string title = part.Branch == null ? map.Name : (superPage ? map.Name + ": " : "") + part.Branch;
-                        grid.Place(new Label { Text = title, AutoSize = true, Margin = Padding.Empty, Padding = new Padding(0, 2, 0, 0) }, column, 0, false);
+                        string title = part.Branch == null ? map.Name : (superPage && shared == 0 ? map.Name + ": " : "") + part.Branch;
+                        grid.Place(Title(title), column, first, false);
                     }
                     uint mask = EeMask(part, superPage, coop);
-                    for (int i = 0; i < list.Steps.Count; i++)
-                        grid.Place(StepBox(list, i, (mask & (1u << i)) != 0), column, i + (headed ? 1 : 0), headed);
+                    for (int i = shared; i < list.Steps.Count; i++)
+                        grid.Place(StepBox(new[] { list }, i, (mask & (1u << i)) != 0), column, first + i - shared + (headed ? 1 : 0), headed);
                 }
                 grid?.EndSection(height);
                 rows += height;
@@ -169,17 +179,34 @@ namespace LiveSplit.T6ZM
             return (rows, dividers);
         }
 
-        CheckBox StepBox(StepList<EeStep> list, int step, bool ticked)
+        static Label Title(string text) => new Label { Text = text, AutoSize = true, Margin = Padding.Empty, Padding = new Padding(0, 2, 0, 0) };
+
+        CheckBox StepBox(StepList<EeStep>[] lists, int step, bool ticked)
         {
-            bool forced = (list.Forced & (1u << step)) != 0;
-            var box = new CheckBox { Text = list.Steps[step].Label, AutoSize = true, Checked = ticked || forced, AutoCheck = !forced, Margin = Padding.Empty };
+            bool forced = (lists[0].Forced & (1u << step)) != 0;
+            var box = new CheckBox { Text = lists[0].Steps[step].Label, AutoSize = true, Checked = ticked || forced, AutoCheck = !forced, Margin = Padding.Empty };
             box.CheckedChanged += (s, e) =>
             {
                 if (filling) return;
-                ticks.Set(list, step, box.Checked);
+                foreach (StepList<EeStep> list in lists) ticks.Set(list, step, box.Checked);
                 OnSettingChanged();
             };
             return box;
+        }
+
+        void SyncShared()
+        {
+            foreach (bool super in new[] { false, true })
+                foreach (EeMap map in super ? EeMaps.Super : EeMaps.All)
+                    foreach (bool coop in new[] { false, true })
+                    {
+                        int shared = map.Shared(coop, super);
+                        StepList<EeStep> lead = map.Parts[0].List(coop, super);
+                        uint mask = ticks.Mask(lead);
+                        foreach (EeMap part in map.Parts.Skip(1))
+                            for (int i = 0; i < shared; i++)
+                                ticks.Set(part.List(coop, super), i, (mask & (1u << i)) != 0);
+                    }
         }
 
         static IEnumerable<StepList<EeStep>> SavedLists()
@@ -203,6 +230,7 @@ namespace LiveSplit.T6ZM
         {
             foreach (StepList<EeStep> list in SavedLists())
                 ticks.Read(list, node?["EE_" + list.Key]?.InnerText, ',');
+            SyncShared();
             eePlayers.SelectedIndex = Math.Max(0, Math.Min(1, ReadInt(node, "EE_Players", 0)));
             pauseRta.Checked = ReadBool(node, "EE_PauseRta", false);
             eeShown = null;

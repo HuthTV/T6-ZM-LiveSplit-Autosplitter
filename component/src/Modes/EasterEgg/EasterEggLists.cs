@@ -35,6 +35,15 @@ namespace LiveSplit.T6ZM
 
         public StepList<EeStep> List(bool coop, bool super) => lists[(super ? 2 : 0) + (coop ? 1 : 0)];
 
+        public int Shared(bool coop, bool super)
+        {
+            if (Branches == null || Branches.Count < 2) return 0;
+            List<IReadOnlyList<EeStep>> steps = Branches.Select(b => b.List(coop, super).Steps).ToList();
+            int n = 0;
+            while (steps.All(s => n < s.Count - 1 && ReferenceEquals(s[n], steps[0][n]))) n++;
+            return n;
+        }
+
         StepList<EeStep> Build(bool coop, bool super)
         {
             IReadOnlyList<EeStep> steps = coop ? Coop : Solo;
