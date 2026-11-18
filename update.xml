@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <updates>
-  <update version="1.0.0">
+  <update version="1.0.1">
     <files>
       <file path="release/LiveSplit.T6ZM.dll" localPath="Components/LiveSplit.T6ZM.dll" status="changed" />
     </files>
     <changelog>
-      <change>github.com/HuthTV/T6-ZM-LiveSplit-Autosplitter/releases</change>
+      <change>Split debug is now off by default</change>
+      <change>Buried and Super EE: duplicate split options removed</change>
+      <change>Full changelog: github.com/HuthTV/T6-ZM-LiveSplit-Autosplitter/releases</change>
     </changelog>
+  </update>
+  <update version="1.0.0">
+    <files>
+      <file path="release/LiveSplit.T6ZM.dll" localPath="Components/LiveSplit.T6ZM.dll" status="changed" />
+    </files>
+    <changelog />
   </update>
 </updates>
