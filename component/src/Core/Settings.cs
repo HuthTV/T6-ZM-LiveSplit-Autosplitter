@@ -9,7 +9,7 @@ namespace LiveSplit.T6ZM
     internal sealed class Settings : UserControl
     {
         readonly ComboBox category = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
-        readonly CheckBox showInfo = new CheckBox { Text = "Split debug", Checked = true, AutoSize = true };
+        readonly CheckBox showInfo = new CheckBox { Text = "Split debug", Checked = false, AutoSize = true };
         readonly CheckBox autoStart = new CheckBox { Text = "Start", Checked = true, AutoSize = true };
         readonly CheckBox autoSplit = new CheckBox { Text = "Split", Checked = true, AutoSize = true };
         readonly CheckBox autoReset = new CheckBox { Text = "Reset", Checked = true, AutoSize = true };
@@ -179,7 +179,7 @@ namespace LiveSplit.T6ZM
                 autoStart.Checked = ReadBool(node, "AutoStart", true);
                 autoSplit.Checked = ReadBool(node, "AutoSplit", true);
                 autoReset.Checked = ReadBool(node, "AutoReset", true);
-                showInfo.Checked = ReadBool(node, "ShowInfo", true);
+                showInfo.Checked = ReadBool(node, "ShowInfo", false);
                 showVelocity.Checked = ReadBool(node, "ShowVelocity", false);
                 velocityDecimals.Checked = ReadBool(node, "VelocityDecimals", false);
                 showFps.Checked = ReadBool(node, "ShowFps", false);
